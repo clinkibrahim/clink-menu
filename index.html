@@ -3,14 +3,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="CLink Menu - حاسبة تكلفة المطاعم الذكية مدعومة بدفترة" />
   <title>CLink Menu | حاسبة تكلفة المطاعم</title>
-  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { background: #0a0906; overflow-x: hidden; }
+    body { background: #0a0906; }
+    #root { min-height: 100vh; }
     ::-webkit-scrollbar { width: 6px; }
     ::-webkit-scrollbar-track { background: #0a0906; }
     ::-webkit-scrollbar-thumb { background: #2e1f0a; border-radius: 3px; }
@@ -18,8 +15,16 @@
 </head>
 <body>
   <div id="root"></div>
-  <script type="text/babel">
-const { useState, useMemo, useEffect, useCallback } = React;
+
+  <!-- React & ReactDOM -->
+  <script crossorigin src="https://unpkg.com/react@18.2.0/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
+  <!-- Babel for JSX -->
+  <script src="https://unpkg.com/@babel/standalone@7.23.6/babel.min.js"></script>
+
+  <script type="text/babel" data-presets="react">
+    const { useState, useMemo, useEffect, useCallback } = React;
+
 
 // ============================================================
 // DAFTRA API LAYER
@@ -137,7 +142,7 @@ const badge = (color, bg) => ({ background: bg || color + "22", color, padding: 
 // ============================================================
 // MAIN APP
 // ============================================================
-export default function App() {
+function App() {
   const [page, setPage] = useState(PAGES.SETUP);
   const [connection, setConnection] = useState({ subdomain: "", apiKey: "", status: "disconnected" });
   const [currency, setCurrency] = useState(CURRENCIES[0]); // default: EGP
@@ -704,8 +709,9 @@ export default function App() {
 }
 
 
-const root = ReactDOM.createRoot(document.getElementById('root'));
-root.render(<App />);
+    const container = document.getElementById('root');
+    const root = ReactDOM.createRoot(container);
+    root.render(React.createElement(App));
   </script>
 </body>
 </html>
