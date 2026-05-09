@@ -1,18 +1,711 @@
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="CLink Menu - حاسبة تكلفة المطاعم الذكية مدعومة بدفترة" />
-    <title>CLink Menu | حاسبة تكلفة المطاعم</title>
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <style>
-      * { margin: 0; padding: 0; box-sizing: border-box; }
-      body { background: #0a0906; }
-    </style>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="CLink Menu - حاسبة تكلفة المطاعم الذكية مدعومة بدفترة" />
+  <title>CLink Menu | حاسبة تكلفة المطاعم</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0a0906; overflow-x: hidden; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #0a0906; }
+    ::-webkit-scrollbar-thumb { background: #2e1f0a; border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+const { useState, useMemo, useEffect, useCallback } = React;
+
+// ============================================================
+// DAFTRA API LAYER
+// Base URL: https://{subdomain}.daftra.com/api2
+// Auth Header: apikey: {your_api_key}
+// ============================================================
+const DaftraAPI = {
+  async getProducts(subdomain, apiKey) {
+    const res = await fetch(
+      `https://${subdomain}.daftra.com/api2/products.json?limit=100`,
+      { headers: { apikey: apiKey, Accept: "application/json", "Content-Type": "application/json" } }
+    );
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    return data.data.map((item) => ({
+      id: item.Product.id,
+      name: item.Product.name,
+      price: parseFloat(item.Product.buy_price) || parseFloat(item.Product.unit_price) || 0,
+      unit: "كجم",
+      category: item.Product.ProductCategory?.[0]?.name || "عام",
+      stock: item.Product.stock_balance || 0,
+      daftraId: item.Product.id,
+    }));
+  },
+  async getPurchaseInvoices(subdomain, apiKey) {
+    const res = await fetch(
+      `https://${subdomain}.daftra.com/api2/purchase_invoices.json?limit=50`,
+      { headers: { apikey: apiKey, Accept: "application/json", "Content-Type": "application/json" } }
+    );
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  },
+};
+
+// ============================================================
+// DEMO DATA (used when not connected to Daftra)
+// ============================================================
+const DEMO_INGREDIENTS = [
+  { id: 1, name: "دجاج مشوي", unit: "كجم", price: 85, category: "بروتين", stock: 15 },
+  { id: 2, name: "أرز بسمتي", unit: "كجم", price: 22, category: "حبوب", stock: 50 },
+  { id: 3, name: "زيت زيتون", unit: "لتر", price: 95, category: "زيوت", stock: 8 },
+  { id: 4, name: "طماطم", unit: "كجم", price: 12, category: "خضروات", stock: 20 },
+  { id: 5, name: "بصل", unit: "كجم", price: 8, category: "خضروات", stock: 25 },
+  { id: 6, name: "ثوم", unit: "كجم", price: 35, category: "توابل", stock: 5 },
+  { id: 7, name: "جبن موزاريلا", unit: "كجم", price: 120, category: "ألبان", stock: 10 },
+  { id: 8, name: "عجينة بيتزا", unit: "كجم", price: 18, category: "حبوب", stock: 30 },
+  { id: 9, name: "لحم بقري", unit: "كجم", price: 180, category: "بروتين", stock: 12 },
+  { id: 10, name: "خس روماني", unit: "كجم", price: 20, category: "خضروات", stock: 18 },
+];
+
+const DEMO_RECIPES = [
+  { id: 1, name: "دجاج مشوي مع أرز", category: "الأطباق الرئيسية", sellingPrice: 95, portions: 1, ingredients: [{ ingredientId: 1, quantity: 0.25 }, { ingredientId: 2, quantity: 0.15 }, { ingredientId: 3, quantity: 0.02 }, { ingredientId: 5, quantity: 0.05 }] },
+  { id: 2, name: "بيتزا مارغريتا", category: "البيتزا", sellingPrice: 85, portions: 1, ingredients: [{ ingredientId: 8, quantity: 0.3 }, { ingredientId: 7, quantity: 0.15 }, { ingredientId: 4, quantity: 0.2 }, { ingredientId: 3, quantity: 0.02 }] },
+  { id: 3, name: "برجر لحم بقري", category: "البرجر", sellingPrice: 120, portions: 1, ingredients: [{ ingredientId: 9, quantity: 0.2 }, { ingredientId: 4, quantity: 0.05 }, { ingredientId: 5, quantity: 0.03 }, { ingredientId: 6, quantity: 0.01 }] },
+];
+
+const PAGES = { SETUP: "setup", DASHBOARD: "dashboard", INGREDIENTS: "ingredients", RECIPES: "recipes", REPORTS: "reports" };
+
+// ============================================================
+// CURRENCIES — Multi-country support
+// ============================================================
+const CURRENCIES = [
+  { code: "EGP", symbol: "ج.م",  name: "الجنيه المصري",    flag: "🇪🇬", country: "مصر" },
+  { code: "SAR", symbol: "ر.س",  name: "الريال السعودي",   flag: "🇸🇦", country: "السعودية" },
+  { code: "AED", symbol: "د.إ",  name: "الدرهم الإماراتي", flag: "🇦🇪", country: "الإمارات" },
+  { code: "KWD", symbol: "د.ك",  name: "الدينار الكويتي",  flag: "🇰🇼", country: "الكويت" },
+  { code: "BHD", symbol: "د.ب",  name: "الدينار البحريني", flag: "🇧🇭", country: "البحرين" },
+  { code: "QAR", symbol: "ر.ق",  name: "الريال القطري",    flag: "🇶🇦", country: "قطر" },
+  { code: "JOD", symbol: "د.أ",  name: "الدينار الأردني",  flag: "🇯🇴", country: "الأردن" },
+];
+
+const getColor = (pct) => pct <= 28 ? "#4ade80" : pct <= 35 ? "#facc15" : "#f87171";
+const getLabel = (pct) => pct <= 28 ? "ممتاز" : pct <= 35 ? "مقبول" : "مرتفع";
+
+// ============================================================
+// STYLES
+// ============================================================
+const C = {
+  bg: "#0a0906", sidebar: "#120f0a", border: "#2e1f0a",
+  gold: "#c9a84c", goldDim: "#7a5520", cream: "#f0e6d3",
+  muted: "#6a5030", faint: "#1e1508",
+};
+
+const s = {
+  app: { minHeight: "100vh", background: C.bg, color: C.cream, fontFamily: "'Cairo', sans-serif", direction: "rtl" },
+  sidebar: { width: 230, background: C.sidebar, borderLeft: `1px solid ${C.border}`, display: "flex", flexDirection: "column", padding: "0", position: "fixed", top: 0, right: 0, bottom: 0, zIndex: 10 },
+  main: { marginRight: 230, padding: "28px 32px", minHeight: "100vh" },
+  topBar: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 28 },
+  pageTitle: { fontSize: 22, fontWeight: 800, color: C.cream, margin: 0 },
+  kpiGrid: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 24 },
+  card: { background: C.sidebar, border: `1px solid ${C.border}`, borderRadius: 12, padding: "20px 22px", marginBottom: 18 },
+  table: { width: "100%", borderCollapse: "collapse" },
+  th: { textAlign: "right", padding: "9px 13px", fontSize: 11, color: C.muted, borderBottom: `1px solid ${C.faint}`, fontWeight: 700, letterSpacing: 0.4 },
+  td: { padding: "12px 13px", fontSize: 13, borderBottom: `1px solid ${C.faint}`, color: "#c0b090", verticalAlign: "middle" },
+  input: { background: "#0a0906", border: `1px solid ${C.border}`, borderRadius: 8, padding: "10px 13px", color: C.cream, fontFamily: "'Cairo', sans-serif", fontSize: 14, width: "100%", boxSizing: "border-box", outline: "none" },
+  select: { background: "#0a0906", border: `1px solid ${C.border}`, borderRadius: 8, padding: "10px 13px", color: C.cream, fontFamily: "'Cairo', sans-serif", fontSize: 14, width: "100%", boxSizing: "border-box" },
+  label: { display: "block", fontSize: 11, color: C.muted, marginBottom: 5, fontWeight: 700 },
+  modal: { position: "fixed", inset: 0, background: "#00000095", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" },
+  modalBox: { background: C.sidebar, border: `1px solid ${C.border}`, borderRadius: 16, padding: 28, width: 520, maxHeight: "88vh", overflowY: "auto" },
+};
+
+const btn = (v) => ({
+  padding: v === "sm" ? "5px 12px" : v === "lg" ? "13px 28px" : "9px 18px",
+  borderRadius: 8, border: "none", cursor: "pointer", fontFamily: "'Cairo', sans-serif", fontWeight: 700,
+  fontSize: v === "sm" ? 12 : v === "lg" ? 15 : 13,
+  ...(v === "primary" ? { background: `linear-gradient(135deg, ${C.gold}, #a07830)`, color: "#0a0906" }
+    : v === "danger" ? { background: "#200808", color: "#f87171", border: "1px solid #f8717130" }
+    : v === "ghost" ? { background: "transparent", color: C.gold, border: `1px solid ${C.goldDim}` }
+    : v === "green" ? { background: "#0a2a0a", color: "#4ade80", border: "1px solid #4ade8033" }
+    : { background: C.faint, color: C.gold }),
+});
+
+const badge = (color, bg) => ({ background: bg || color + "22", color, padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700, display: "inline-block" });
+
+// ============================================================
+// MAIN APP
+// ============================================================
+export default function App() {
+  const [page, setPage] = useState(PAGES.SETUP);
+  const [connection, setConnection] = useState({ subdomain: "", apiKey: "", status: "disconnected" });
+  const [currency, setCurrency] = useState(CURRENCIES[0]); // default: EGP
+  const [ingredients, setIngredients] = useState(DEMO_INGREDIENTS);
+  const [recipes, setRecipes] = useState(DEMO_RECIPES);
+  const [syncLog, setSyncLog] = useState([]);
+  const [alert, setAlert] = useState(null);
+
+  // Forms
+  const [showIngForm, setShowIngForm] = useState(false);
+  const [showRecipeForm, setShowRecipeForm] = useState(false);
+  const [editingRecipe, setEditingRecipe] = useState(null);
+  const [newIng, setNewIng] = useState({ name: "", unit: "كجم", price: "", category: "خضروات" });
+  const [newRecipe, setNewRecipe] = useState({ name: "", category: "الأطباق الرئيسية", sellingPrice: "", portions: 1, ingredients: [] });
+  const [recipeIngRow, setRecipeIngRow] = useState({ ingredientId: "", quantity: "" });
+
+  const toast = (msg, type = "success") => { setAlert({ msg, type }); setTimeout(() => setAlert(null), 3500); };
+
+  const addLog = (msg, type = "info") => setSyncLog(prev => [{ msg, type, time: new Date().toLocaleTimeString("ar-EG") }, ...prev.slice(0, 19)]);
+
+  // ── Daftra Connection ──────────────────────────────────────
+  const connectDaftra = async () => {
+    if (!connection.subdomain || !connection.apiKey) return toast("أدخل النطاق الفرعي ومفتاح API", "error");
+    setConnection(c => ({ ...c, status: "connecting" }));
+    addLog("جاري الاتصال بدفترة...", "info");
+    try {
+      const products = await DaftraAPI.getProducts(connection.subdomain, connection.apiKey);
+      const mapped = products.map((p, i) => ({ ...p, id: i + 1 }));
+      setIngredients(mapped);
+      setConnection(c => ({ ...c, status: "connected" }));
+      addLog(`✓ تم الاتصال — تم جلب ${mapped.length} منتج من دفترة`, "success");
+      toast(`تم الاتصال بنجاح! جُلب ${mapped.length} مكوّن من دفترة`);
+      setPage(PAGES.DASHBOARD);
+    } catch (err) {
+      // CORS in browser sandbox — switch to demo mode with note
+      setConnection(c => ({ ...c, status: "demo" }));
+      addLog("⚠ CORS في بيئة المتصفح — تشغيل Demo Mode. عند النشر على دفترة يعمل الاتصال الحقيقي.", "warn");
+      toast("تم تفعيل وضع التجربة — سيعمل الاتصال الحقيقي بعد النشر على دفترة", "warn");
+      setPage(PAGES.DASHBOARD);
+    }
+  };
+
+  const syncPrices = async () => {
+    if (connection.status !== "connected") return toast("يجب الاتصال بدفترة أولاً", "error");
+    addLog("جاري تحديث الأسعار من فواتير المشتريات...", "info");
+    try {
+      const data = await DaftraAPI.getProducts(connection.subdomain, connection.apiKey);
+      setIngredients(prev => prev.map(ing => {
+        const match = data.find(d => d.daftraId === ing.daftraId);
+        if (match && match.price !== ing.price) {
+          addLog(`↑ ${ing.name}: ${ing.price} → ${match.price} $${currency.symbol}`, "success");
+          return { ...ing, price: match.price };
+        }
+        return ing;
+      }));
+      toast("تم تحديث الأسعار من دفترة");
+    } catch (e) { toast("فشل التحديث", "error"); }
+  };
+
+  // ── Recipe Calculations ────────────────────────────────────
+  const calcCost = (recipe) => recipe.ingredients.reduce((sum, ri) => {
+    const ing = ingredients.find(i => i.id === ri.ingredientId);
+    return sum + (ing ? ing.price * ri.quantity : 0);
+  }, 0);
+
+  const enriched = useMemo(() => recipes.map(r => {
+    const cost = calcCost(r);
+    const pct = r.sellingPrice > 0 ? (cost / r.sellingPrice) * 100 : 0;
+    return { ...r, cost, pct, profit: r.sellingPrice - cost };
+  }), [recipes, ingredients]);
+
+  const avgFoodCost = useMemo(() => enriched.length ? enriched.reduce((s, r) => s + r.pct, 0) / enriched.length : 0, [enriched]);
+
+  // ── Ingredient CRUD ────────────────────────────────────────
+  const addIngredient = () => {
+    if (!newIng.name || !newIng.price) return toast("أدخل اسم المكوّن والسعر", "error");
+    setIngredients([...ingredients, { ...newIng, id: Date.now(), price: parseFloat(newIng.price) }]);
+    setNewIng({ name: "", unit: "كجم", price: "", category: "خضروات" });
+    setShowIngForm(false); toast("تم إضافة المكوّن");
+  };
+
+  // ── Recipe CRUD ────────────────────────────────────────────
+  const addRecipeIng = () => {
+    if (!recipeIngRow.ingredientId || !recipeIngRow.quantity) return;
+    setNewRecipe(r => ({ ...r, ingredients: [...r.ingredients, { ingredientId: parseInt(recipeIngRow.ingredientId), quantity: parseFloat(recipeIngRow.quantity) }] }));
+    setRecipeIngRow({ ingredientId: "", quantity: "" });
+  };
+
+  const saveRecipe = () => {
+    if (!newRecipe.name || !newRecipe.sellingPrice) return toast("أدخل اسم الوصفة وسعر البيع", "error");
+    if (editingRecipe) {
+      setRecipes(rs => rs.map(r => r.id === editingRecipe ? { ...newRecipe, id: editingRecipe, sellingPrice: parseFloat(newRecipe.sellingPrice) } : r));
+      toast("تم تعديل الوصفة");
+    } else {
+      setRecipes(rs => [...rs, { ...newRecipe, id: Date.now(), sellingPrice: parseFloat(newRecipe.sellingPrice) }]);
+      toast("تم إضافة الوصفة");
+    }
+    setShowRecipeForm(false); setEditingRecipe(null);
+    setNewRecipe({ name: "", category: "الأطباق الرئيسية", sellingPrice: "", portions: 1, ingredients: [] });
+  };
+
+  // ── Status Badge ───────────────────────────────────────────
+  const statusInfo = {
+    disconnected: { color: "#6a5030", dot: "#6a5030", label: "غير متصل" },
+    connecting: { color: "#facc15", dot: "#facc15", label: "جاري الاتصال..." },
+    connected: { color: "#4ade80", dot: "#4ade80", label: "متصل بدفترة" },
+    demo: { color: "#facc15", dot: "#facc15", label: "وضع التجربة" },
+    error: { color: "#f87171", dot: "#f87171", label: "خطأ في الاتصال" },
+  }[connection.status];
+
+  const navItems = [
+    { id: PAGES.DASHBOARD, icon: "◈", label: "لوحة التحكم" },
+    { id: PAGES.INGREDIENTS, icon: "⊞", label: "المكوّنات" },
+    { id: PAGES.RECIPES, icon: "✦", label: "الوصفات" },
+    { id: PAGES.REPORTS, icon: "◎", label: "التقارير" },
+    { id: PAGES.SETUP, icon: "⚙", label: "إعدادات دفترة" },
+  ];
+
+  // ============================================================
+  // RENDER: SETUP PAGE
+  // ============================================================
+  const renderSetup = () => (
+    <div style={{ maxWidth: 620 }}>
+      <div style={{ ...s.card, borderColor: C.gold + "44", marginBottom: 24 }}>
+        <div style={{ display: "flex", gap: 14, alignItems: "flex-start", marginBottom: 20 }}>
+          <div style={{ width: 44, height: 44, borderRadius: 12, background: C.gold + "22", border: `1px solid ${C.gold}44`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>⚙</div>
+          <div>
+            <div style={{ fontSize: 17, fontWeight: 800, color: C.cream }}>ربط التطبيق بحساب دفترة</div>
+            <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>أدخل بيانات حسابك لجلب المنتجات والأسعار تلقائياً</div>
+          </div>
+        </div>
+
+        <div style={{ marginBottom: 14 }}>
+          <label style={s.label}>النطاق الفرعي لحسابك في دفترة</label>
+          <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
+            <div style={{ padding: "10px 13px", background: "#1a1208", border: `1px solid ${C.border}`, borderRadius: "0 8px 8px 0", fontSize: 13, color: C.muted, whiteSpace: "nowrap" }}>.daftra.com</div>
+            <input style={{ ...s.input, borderRadius: "8px 0 0 8px", borderLeft: "none" }} placeholder="اسم-شركتك" value={connection.subdomain} onChange={e => setConnection(c => ({ ...c, subdomain: e.target.value }))} />
+          </div>
+          <div style={{ fontSize: 11, color: "#5a4030", marginTop: 5 }}>مثال: إذا رابط دفترة هو mycompany.daftra.com أدخل: mycompany</div>
+        </div>
+
+        <div style={{ marginBottom: 20 }}>
+          <label style={s.label}>مفتاح API</label>
+          <input style={s.input} type="password" placeholder="أدخل مفتاح API من إعدادات دفترة" value={connection.apiKey} onChange={e => setConnection(c => ({ ...c, apiKey: e.target.value }))} />
+          <div style={{ fontSize: 11, color: "#5a4030", marginTop: 5 }}>من دفترة: الإعدادات ← API ← مفاتيح API</div>
+        </div>
+
+        <div style={{ marginBottom: 20 }}>
+          <label style={s.label}>العملة</label>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, marginBottom: 8 }}>
+            {CURRENCIES.map(c => (
+              <div key={c.code} onClick={() => setCurrency(c)} style={{ padding: "10px 8px", borderRadius: 8, border: `1px solid ${currency.code === c.code ? C.gold : C.border}`, background: currency.code === c.code ? C.gold + "18" : C.bg, cursor: "pointer", textAlign: "center", transition: "all 0.15s" }}>
+                <div style={{ fontSize: 20, marginBottom: 2 }}>{c.flag}</div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: currency.code === c.code ? C.gold : "#c0b090" }}>{c.symbol}</div>
+                <div style={{ fontSize: 9, color: "#6a5030", marginTop: 1 }}>{c.country}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{ fontSize: 11, color: "#5a4030", padding: "8px 12px", background: C.bg, borderRadius: 6, border: `1px solid ${C.border}` }}>
+            العملة المختارة: <strong style={{ color: C.gold }}>{currency.flag} {currency.name} — ${currency.symbol}</strong>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 10 }}>
+          <button style={btn("primary")} onClick={connectDaftra} disabled={connection.status === "connecting"}>
+            {connection.status === "connecting" ? "جاري الاتصال..." : "اتصال بدفترة"}
+          </button>
+          <button style={btn("ghost")} onClick={() => { setConnection(c => ({ ...c, status: "demo" })); setPage(PAGES.DASHBOARD); toast("تم تفعيل وضع التجربة", "warn"); }}>
+            تجربة بدون اتصال
+          </button>
+        </div>
+      </div>
+
+      <div style={s.card}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: C.gold, marginBottom: 14 }}>⟳ سجل الاتصال</div>
+        {syncLog.length === 0 ? (
+          <div style={{ fontSize: 13, color: C.muted, textAlign: "center", padding: "20px 0" }}>لا توجد سجلات بعد</div>
+        ) : syncLog.map((log, i) => (
+          <div key={i} style={{ display: "flex", gap: 10, padding: "7px 0", borderBottom: `1px solid ${C.faint}`, alignItems: "flex-start" }}>
+            <span style={{ fontSize: 11, color: "#5a4030", whiteSpace: "nowrap", marginTop: 2 }}>{log.time}</span>
+            <span style={{ fontSize: 12, color: log.type === "success" ? "#4ade80" : log.type === "warn" ? "#facc15" : log.type === "error" ? "#f87171" : C.muted }}>{log.msg}</span>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ ...s.card, background: "#0e0a04", border: `1px solid #3a2a1033` }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: C.muted, marginBottom: 10 }}>كيف يعمل الربط؟</div>
+        {[
+          { step: "١", text: "التطبيق يجلب منتجاتك من دفترة كمكوّنات جاهزة مع أسعار الشراء" },
+          { step: "٢", text: "تحديث الأسعار تلقائي من فواتير المشتريات — لا تعديل يدوي" },
+          { step: "٣", text: "عند النشر على متجر دفترة، الربط يعمل بالكامل داخل واجهة دفترة" },
+        ].map((item, i) => (
+          <div key={i} style={{ display: "flex", gap: 10, marginBottom: 10, alignItems: "flex-start" }}>
+            <span style={{ background: C.gold + "22", color: C.gold, padding: "2px 8px", borderRadius: 6, fontSize: 12, fontWeight: 800, flexShrink: 0 }}>{item.step}</span>
+            <span style={{ fontSize: 12, color: "#7a6040", lineHeight: 1.6 }}>{item.text}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  // ============================================================
+  // RENDER: DASHBOARD
+  // ============================================================
+  const renderDashboard = () => (
+    <>
+      <div style={s.kpiGrid}>
+        {[
+          { label: "متوسط نسبة التكلفة", value: `${avgFoodCost.toFixed(1)}%`, accent: getColor(avgFoodCost), sub: getLabel(avgFoodCost) },
+          { label: "عدد الوصفات", value: enriched.length, accent: "#60a5fa", sub: "وصفة مسجّلة" },
+          { label: "عدد المكوّنات", value: ingredients.length, accent: "#a78bfa", sub: connection.status === "connected" ? "مجلوب من دفترة" : "مكوّن محلي" },
+          { label: "أعلى هامش ربح", value: enriched.length ? `${Math.max(...enriched.map(r => r.profit)).toFixed(0)} ${currency.symbol}` : "—", accent: "#4ade80", sub: enriched.length ? enriched.sort((a, b) => b.profit - a.profit)[0]?.name : "" },
+        ].map((k, i) => (
+          <div key={i} style={{ background: C.sidebar, border: `1px solid ${k.accent}25`, borderRadius: 12, padding: "18px 20px", position: "relative", overflow: "hidden" }}>
+            <div style={{ position: "absolute", top: -24, left: -24, width: 80, height: 80, background: k.accent, borderRadius: "50%", filter: "blur(40px)", opacity: 0.1 }} />
+            <div style={{ fontSize: 11, color: C.muted, marginBottom: 6 }}>{k.label}</div>
+            <div style={{ fontSize: 26, fontWeight: 800, color: k.accent }}>{k.value}</div>
+            <div style={{ fontSize: 11, color: "#4a3020", marginTop: 3 }}>{k.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={s.card}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: C.gold, marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span>✦ أداء الوصفات</span>
+          {connection.status === "connected" && <button style={btn("sm")} onClick={syncPrices}>⟳ تحديث الأسعار من دفترة</button>}
+        </div>
+        <table style={s.table}>
+          <thead><tr>{["الوصفة", "تكلفة الطبق", "سعر البيع", "هامش الربح", "نسبة التكلفة", "الحالة"].map(h => <th key={h} style={s.th}>{h}</th>)}</tr></thead>
+          <tbody>
+            {enriched.map(r => (
+              <tr key={r.id}>
+                <td style={{ ...s.td, fontWeight: 700, color: C.cream }}>{r.name}</td>
+                <td style={s.td}>{r.cost.toFixed(2)} {currency.symbol}</td>
+                <td style={s.td}>{r.sellingPrice} {currency.symbol}</td>
+                <td style={{ ...s.td, color: "#4ade80", fontWeight: 700 }}>{r.profit.toFixed(2)} {currency.symbol}</td>
+                <td style={s.td}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 100 }}>
+                    <div style={{ flex: 1, height: 5, background: "#2a1e0c", borderRadius: 3 }}>
+                      <div style={{ height: "100%", width: `${Math.min(r.pct, 100)}%`, background: getColor(r.pct), borderRadius: 3 }} />
+                    </div>
+                    <span style={{ color: getColor(r.pct), fontWeight: 700, fontSize: 13, minWidth: 36 }}>{r.pct.toFixed(1)}%</span>
+                  </div>
+                </td>
+                <td style={s.td}><span style={badge(getColor(r.pct))}>{getLabel(r.pct)}</span></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <div style={s.card}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: C.gold, marginBottom: 14 }}>⊞ أغلى المكوّنات</div>
+          {[...ingredients].sort((a, b) => b.price - a.price).slice(0, 5).map((ing, i) => (
+            <div key={ing.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderBottom: `1px solid ${C.faint}` }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 10, color: "#5a4030", fontWeight: 800 }}>#{i + 1}</span>
+                <div>
+                  <div style={{ fontSize: 13, color: "#d0c0a0", fontWeight: 600 }}>{ing.name}</div>
+                  <div style={{ fontSize: 10, color: "#5a4030" }}>{ing.category}</div>
+                </div>
+              </div>
+              <span style={{ color: C.gold, fontWeight: 700, fontSize: 13 }}>{ing.price} ${currency.symbol}/{ing.unit}</span>
+            </div>
+          ))}
+        </div>
+        <div style={s.card}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: C.gold, marginBottom: 14 }}>◎ ملخص الحالة</div>
+          {[
+            { label: "وصفات بتكلفة ممتازة (≤28%)", n: enriched.filter(r => r.pct <= 28).length, color: "#4ade80" },
+            { label: "وصفات مقبولة (29-35%)", n: enriched.filter(r => r.pct > 28 && r.pct <= 35).length, color: "#facc15" },
+            { label: "وصفات مرتفعة التكلفة (>35%)", n: enriched.filter(r => r.pct > 35).length, color: "#f87171" },
+          ].map((item, i) => (
+            <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 0", borderBottom: `1px solid ${C.faint}` }}>
+              <span style={{ fontSize: 12, color: "#8a7060" }}>{item.label}</span>
+              <span style={{ fontSize: 22, fontWeight: 800, color: item.color }}>{item.n}</span>
+            </div>
+          ))}
+          <div style={{ marginTop: 14, padding: "11px 14px", background: avgFoodCost <= 30 ? "#081808" : "#1a1000", borderRadius: 8, border: `1px solid ${avgFoodCost <= 30 ? "#4ade8030" : "#facc1530"}` }}>
+            <div style={{ fontSize: 12, color: avgFoodCost <= 30 ? "#4ade80" : "#facc15", fontWeight: 600 }}>
+              {avgFoodCost <= 28 ? "✓ نسبة التكلفة ممتازة — استمر" : avgFoodCost <= 35 ? "⚠ راجع الوصفات ذات التكلفة المرتفعة" : "✗ مراجعة عاجلة للأسعار والمكوّنات"}
+            </div>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+
+  // ============================================================
+  // RENDER: INGREDIENTS
+  // ============================================================
+  const renderIngredients = () => (
+    <>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <span style={{ fontSize: 12, color: C.muted }}>{ingredients.length} مكوّن</span>
+          {connection.status === "connected" && <button style={btn("green")} onClick={syncPrices}>⟳ تحديث من دفترة</button>}
+        </div>
+        <button style={btn("primary")} onClick={() => setShowIngForm(true)}>+ إضافة مكوّن</button>
+      </div>
+      <div style={s.card}>
+        <table style={s.table}>
+          <thead><tr>{["المكوّن", "التصنيف", "الوحدة", "سعر الشراء", "المخزون", "إجراء"].map(h => <th key={h} style={s.th}>{h}</th>)}</tr></thead>
+          <tbody>
+            {ingredients.map(ing => (
+              <tr key={ing.id}>
+                <td style={{ ...s.td, fontWeight: 700, color: C.cream }}>{ing.name}{ing.daftraId && <span style={{ ...badge("#60a5fa"), marginRight: 6, fontSize: 10 }}>دفترة</span>}</td>
+                <td style={s.td}><span style={badge("#a78bfa")}>{ing.category}</span></td>
+                <td style={s.td}>{ing.unit}</td>
+                <td style={{ ...s.td, color: C.gold, fontWeight: 700 }}>{ing.price} {currency.symbol}</td>
+                <td style={s.td}>{ing.stock || "—"}</td>
+                <td style={s.td}><button style={btn("danger")} onClick={() => { setIngredients(i => i.filter(x => x.id !== ing.id)); toast("تم الحذف"); }}>حذف</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {showIngForm && (
+        <div style={s.modal}>
+          <div style={s.modalBox}>
+            <div style={{ fontSize: 17, fontWeight: 800, color: C.gold, marginBottom: 18 }}>إضافة مكوّن جديد</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+              <div><label style={s.label}>اسم المكوّن</label><input style={s.input} value={newIng.name} onChange={e => setNewIng({ ...newIng, name: e.target.value })} /></div>
+              <div><label style={s.label}>التصنيف</label><select style={s.select} value={newIng.category} onChange={e => setNewIng({ ...newIng, category: e.target.value })}>{["بروتين", "خضروات", "حبوب", "ألبان", "زيوت", "توابل", "أخرى"].map(c => <option key={c}>{c}</option>)}</select></div>
+              <div><label style={s.label}>وحدة القياس</label><select style={s.select} value={newIng.unit} onChange={e => setNewIng({ ...newIng, unit: e.target.value })}>{["كجم", "جم", "لتر", "مل", "حبة", "علبة"].map(u => <option key={u}>{u}</option>)}</select></div>
+              <div><label style={s.label}>سعر الشراء (${currency.symbol})</label><input style={s.input} type="number" value={newIng.price} onChange={e => setNewIng({ ...newIng, price: e.target.value })} /></div>
+            </div>
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+              <button style={btn("ghost")} onClick={() => setShowIngForm(false)}>إلغاء</button>
+              <button style={btn("primary")} onClick={addIngredient}>حفظ</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+
+  // ============================================================
+  // RENDER: RECIPES
+  // ============================================================
+  const renderRecipes = () => (
+    <>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 18 }}>
+        <span style={{ fontSize: 12, color: C.muted }}>{recipes.length} وصفة</span>
+        <button style={btn("primary")} onClick={() => { setEditingRecipe(null); setNewRecipe({ name: "", category: "الأطباق الرئيسية", sellingPrice: "", portions: 1, ingredients: [] }); setShowRecipeForm(true); }}>+ إضافة وصفة</button>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
+        {enriched.map(r => (
+          <div key={r.id} style={{ ...s.card, marginBottom: 0, position: "relative", overflow: "hidden" }}>
+            <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: `linear-gradient(90deg, ${getColor(r.pct)}, transparent)` }} />
+            <div style={{ fontSize: 15, fontWeight: 800, color: C.cream, marginBottom: 4 }}>{r.name}</div>
+            <div style={{ marginBottom: 14 }}><span style={badge("#a78bfa")}>{r.category}</span></div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
+              {[
+                { label: "تكلفة الطبق", val: `${r.cost.toFixed(2)} ${currency.symbol}`, color: "#f87171" },
+                { label: "سعر البيع", val: `${r.sellingPrice} ${currency.symbol}`, color: "#60a5fa" },
+                { label: "هامش الربح", val: `${r.profit.toFixed(2)} {currency.symbol}`, color: "#4ade80" },
+                { label: "نسبة التكلفة", val: `${r.pct.toFixed(1)}%`, color: getColor(r.pct) },
+              ].map((item, i) => (
+                <div key={i} style={{ background: C.bg, borderRadius: 7, padding: "9px 10px" }}>
+                  <div style={{ fontSize: 10, color: "#5a4030", marginBottom: 2 }}>{item.label}</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: item.color }}>{item.val}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{ height: 5, background: "#2a1e0c", borderRadius: 3, marginBottom: 10 }}>
+              <div style={{ height: "100%", width: `${Math.min(r.pct, 100)}%`, background: getColor(r.pct), borderRadius: 3 }} />
+            </div>
+            <button style={{ ...btn("ghost"), width: "100%", textAlign: "center", fontSize: 12 }} onClick={() => { setNewRecipe({ ...r, sellingPrice: r.sellingPrice.toString() }); setEditingRecipe(r.id); setShowRecipeForm(true); }}>تعديل</button>
+          </div>
+        ))}
+      </div>
+      {showRecipeForm && (
+        <div style={s.modal}>
+          <div style={s.modalBox}>
+            <div style={{ fontSize: 17, fontWeight: 800, color: C.gold, marginBottom: 18 }}>{editingRecipe ? "تعديل الوصفة" : "إضافة وصفة جديدة"}</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+              <div><label style={s.label}>اسم الوصفة</label><input style={s.input} value={newRecipe.name} onChange={e => setNewRecipe({ ...newRecipe, name: e.target.value })} /></div>
+              <div><label style={s.label}>التصنيف</label><select style={s.select} value={newRecipe.category} onChange={e => setNewRecipe({ ...newRecipe, category: e.target.value })}>{["الأطباق الرئيسية", "البيتزا", "البرجر", "السلطات", "المشروبات", "الحلويات", "المقبلات"].map(c => <option key={c}>{c}</option>)}</select></div>
+              <div><label style={s.label}>سعر البيع ({currency.symbol})</label><input style={s.input} type="number" value={newRecipe.sellingPrice} onChange={e => setNewRecipe({ ...newRecipe, sellingPrice: e.target.value })} /></div>
+              <div><label style={s.label}>عدد الحصص</label><input style={s.input} type="number" value={newRecipe.portions} onChange={e => setNewRecipe({ ...newRecipe, portions: parseInt(e.target.value) })} /></div>
+            </div>
+            <label style={s.label}>إضافة مكوّنات</label>
+            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+              <select style={{ ...s.select, flex: 2 }} value={recipeIngRow.ingredientId} onChange={e => setRecipeIngRow({ ...recipeIngRow, ingredientId: e.target.value })}>
+                <option value="">اختر مكوّناً</option>
+                {ingredients.map(i => <option key={i.id} value={i.id}>{i.name} — {i.price} ${currency.symbol}/{i.unit}</option>)}
+              </select>
+              <input style={{ ...s.input, flex: 1 }} type="number" step="0.01" placeholder="الكمية" value={recipeIngRow.quantity} onChange={e => setRecipeIngRow({ ...recipeIngRow, quantity: e.target.value })} />
+              <button style={btn("primary")} onClick={addRecipeIng}>+</button>
+            </div>
+            {newRecipe.ingredients.length > 0 && (
+              <div style={{ background: C.bg, borderRadius: 8, padding: "10px 12px", marginBottom: 14 }}>
+                {newRecipe.ingredients.map((ri, i) => {
+                  const ing = ingredients.find(x => x.id === ri.ingredientId);
+                  return ing ? (
+                    <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: `1px solid ${C.faint}` }}>
+                      <span style={{ fontSize: 13, color: "#d0c0a0" }}>{ing.name}</span>
+                      <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                        <span style={{ fontSize: 12, color: C.muted }}>{ri.quantity} {ing.unit}</span>
+                        <span style={{ color: C.gold, fontWeight: 700, fontSize: 13 }}>{(ing.price * ri.quantity).toFixed(2)} ${currency.symbol}</span>
+                        <button style={{ background: "none", border: "none", color: "#f87171", cursor: "pointer", fontSize: 15 }} onClick={() => setNewRecipe(r => ({ ...r, ingredients: r.ingredients.filter((_, idx) => idx !== i) }))}>×</button>
+                      </div>
+                    </div>
+                  ) : null;
+                })}
+                <div style={{ marginTop: 8, display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 700, paddingTop: 8, borderTop: `1px solid ${C.border}` }}>
+                  <span style={{ color: C.muted }}>إجمالي التكلفة</span>
+                  <span style={{ color: C.gold }}>{newRecipe.ingredients.reduce((sum, ri) => { const ing = ingredients.find(x => x.id === ri.ingredientId); return sum + (ing ? ing.price * ri.quantity : 0); }, 0).toFixed(2)} ${currency.symbol}</span>
+                </div>
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+              <button style={btn("ghost")} onClick={() => { setShowRecipeForm(false); setEditingRecipe(null); }}>إلغاء</button>
+              <button style={btn("primary")} onClick={saveRecipe}>{editingRecipe ? "حفظ التعديلات" : "حفظ الوصفة"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+
+  // ============================================================
+  // RENDER: REPORTS
+  // ============================================================
+  const renderReports = () => (
+    <>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 18 }}>
+        <div style={s.card}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: C.gold, marginBottom: 14 }}>⚠ وصفات بتكلفة مرتفعة</div>
+          {[...enriched].sort((a, b) => b.pct - a.pct).map(r => (
+            <div key={r.id} style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderBottom: `1px solid ${C.faint}` }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#d0c0a0" }}>{r.name}</div>
+                <div style={{ fontSize: 11, color: "#5a4030" }}>تكلفة: {r.cost.toFixed(2)} {currency.symbol} | بيع: {r.sellingPrice} ${currency.symbol}</div>
+              </div>
+              <span style={{ ...badge(getColor(r.pct)), padding: "4px 12px", fontSize: 13 }}>{r.pct.toFixed(1)}%</span>
+            </div>
+          ))}
+        </div>
+        <div style={s.card}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: C.gold, marginBottom: 14 }}>✦ أعلى هوامش ربح</div>
+          {[...enriched].sort((a, b) => b.profit - a.profit).map(r => (
+            <div key={r.id} style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderBottom: `1px solid ${C.faint}` }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#d0c0a0" }}>{r.name}</div>
+                <div style={{ fontSize: 11, color: "#5a4030" }}>{r.category}</div>
+              </div>
+              <span style={{ color: "#4ade80", fontWeight: 800, fontSize: 15 }}>+{r.profit.toFixed(2)} {currency.symbol}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div style={s.card}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: C.gold, marginBottom: 16 }}>◎ تقرير شامل لجميع الوصفات</div>
+        <table style={s.table}>
+          <thead><tr>{["الوصفة", "تكلفة المكوّنات", "سعر البيع", "هامش الربح", "نسبة التكلفة", "التوصية"].map(h => <th key={h} style={s.th}>{h}</th>)}</tr></thead>
+          <tbody>
+            {enriched.map(r => (
+              <tr key={r.id}>
+                <td style={{ ...s.td, fontWeight: 700, color: C.cream }}>{r.name}</td>
+                <td style={s.td}>{r.cost.toFixed(2)} {currency.symbol}</td>
+                <td style={s.td}>{r.sellingPrice} {currency.symbol}</td>
+                <td style={{ ...s.td, color: "#4ade80", fontWeight: 700 }}>{r.profit.toFixed(2)} {currency.symbol}</td>
+                <td style={{ ...s.td, color: getColor(r.pct), fontWeight: 700 }}>{r.pct.toFixed(1)}%</td>
+                <td style={{ ...s.td, fontSize: 12 }}>{r.pct <= 28 ? "✓ لا تعديل مطلوب" : r.pct <= 35 ? "⚠ راجع الكميات" : "✗ رفع السعر أو تخفيض المكوّنات"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+
+  // ============================================================
+  // MAIN RENDER
+  // ============================================================
+  return (
+    <>
+      <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet" />
+      <div style={s.app}>
+        {alert && (
+          <div style={{ position: "fixed", top: 20, left: "50%", transform: "translateX(-50%)", background: alert.type === "error" ? "#200808" : alert.type === "warn" ? "#1a1400" : "#081808", border: `1px solid ${alert.type === "error" ? "#f87171" : alert.type === "warn" ? "#facc15" : "#4ade80"}`, color: alert.type === "error" ? "#f87171" : alert.type === "warn" ? "#facc15" : "#4ade80", padding: "11px 22px", borderRadius: 10, fontSize: 13, fontWeight: 700, zIndex: 999, boxShadow: "0 8px 30px #00000080" }}>
+            {alert.msg}
+          </div>
+        )}
+        <div style={s.sidebar}>
+          <div style={{ padding: "18px 16px 16px", borderBottom: `1px solid ${C.border}` }}>
+            {/* CLink Logo Mark */}
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+              {/* SVG Logo Mark */}
+              <svg width="38" height="38" viewBox="0 0 48 48" style={{ flexShrink: 0 }}>
+                <rect width="48" height="48" rx="11" fill="#0a0906" />
+                {/* C arc */}
+                <path d="M 33.19 14.81 A 13 13 0 1 0 33.19 33.19"
+                  fill="none" stroke="#C8A84B" strokeWidth="3.2" strokeLinecap="round" />
+                {/* Node dots */}
+                <circle cx="33.19" cy="14.81" r="2.8" fill="#C8A84B" />
+                <circle cx="33.19" cy="33.19" r="2.8" fill="#C8A84B" />
+                {/* Link dashes */}
+                <line x1="36" y1="14.81" x2="42" y2="14.81" stroke="#C8A84B" strokeWidth="1.5" strokeDasharray="2 2" strokeLinecap="round" opacity="0.6" />
+                <line x1="36" y1="33.19" x2="42" y2="33.19" stroke="#C8A84B" strokeWidth="1.5" strokeDasharray="2 2" strokeLinecap="round" opacity="0.6" />
+                <circle cx="43.5" cy="24" r="2.2" fill="#C8A84B" opacity="0.85" />
+              </svg>
+              {/* Wordmark */}
+              <div>
+                <div style={{ fontSize: 17, fontWeight: 900, color: C.cream, lineHeight: 1, letterSpacing: -0.3, fontFamily: "Georgia, serif" }}>
+                  CLink<span style={{ color: C.gold }}>·</span>
+                </div>
+                <div style={{ fontSize: 9, color: C.gold, letterSpacing: 2.5, fontWeight: 700, marginTop: 2, textTransform: "uppercase" }}>Financial Apps</div>
+              </div>
+            </div>
+            {/* App Badge */}
+            <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 10px", background: "#8B5CF618", border: "1px solid #8B5CF633", borderRadius: 6 }}>
+              <span style={{ fontSize: 12 }}>⬡</span>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#A78BFA" }}>Menu</div>
+                <div style={{ fontSize: 9, color: C.muted, fontFamily: "'Cairo', sans-serif" }}>حاسبة تكلفة المطاعم</div>
+              </div>
+              <div style={{ marginRight: "auto", fontSize: 12 }}>{currency.flag}</div>
+            </div>
+          </div>
+
+          <nav style={{ padding: "14px 12px", flex: 1 }}>
+            {navItems.map(item => (
+              <div key={item.id} onClick={() => setPage(item.id)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 13px", borderRadius: 9, marginBottom: 3, cursor: "pointer", background: page === item.id ? C.gold + "18" : "transparent", border: `1px solid ${page === item.id ? C.gold + "40" : "transparent"}`, color: page === item.id ? C.gold : C.muted, fontWeight: page === item.id ? 700 : 400, fontSize: 13, transition: "all 0.15s" }}>
+                <span style={{ fontSize: 15 }}>{item.icon}</span>
+                <span>{item.label}</span>
+              </div>
+            ))}
+          </nav>
+
+          {/* Connection Status */}
+          <div style={{ padding: "14px 16px", borderTop: `1px solid ${C.border}` }}>
+            <div style={{ fontSize: 10, color: "#4a3020", marginBottom: 6, fontWeight: 700 }}>حالة الاتصال</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 12px", background: C.bg, borderRadius: 8, border: `1px solid ${C.border}` }}>
+              <div style={{ width: 7, height: 7, borderRadius: "50%", background: statusInfo.dot, boxShadow: `0 0 6px ${statusInfo.dot}` }} />
+              <span style={{ fontSize: 11, color: statusInfo.color, fontWeight: 600 }}>{statusInfo.label}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* MAIN */}
+        <main style={s.main}>
+          <div style={s.topBar}>
+            <h1 style={s.pageTitle}>{navItems.find(n => n.id === page)?.label}</h1>
+            {page !== PAGES.SETUP && (
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                {connection.status === "demo" && <span style={{ ...badge("#facc15"), fontSize: 11 }}>وضع التجربة</span>}
+                <button style={btn("ghost")} onClick={() => setPage(PAGES.SETUP)}>⚙ إعدادات دفترة</button>
+              </div>
+            )}
+          </div>
+          {page === PAGES.SETUP && renderSetup()}
+          {page === PAGES.DASHBOARD && renderDashboard()}
+          {page === PAGES.INGREDIENTS && renderIngredients()}
+          {page === PAGES.RECIPES && renderRecipes()}
+          {page === PAGES.REPORTS && renderReports()}
+        </main>
+      </div>
+    </>
+  );
+}
+
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+  </script>
+</body>
 </html>
