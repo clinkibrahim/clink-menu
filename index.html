@@ -3,16 +3,8 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <meta name="description" content="CLink Menu - حاسبة تكلفة المطاعم | Restaurant Food Cost Calculator"/>
   <title>CLink Menu | حاسبة تكلفة المطاعم</title>
-  <style>
-    * { margin:0; padding:0; box-sizing:border-box; }
-    body { background:#FFFDF7; }
-    ::-webkit-scrollbar { width:6px; }
-    ::-webkit-scrollbar-track { background:#FEF8ED; }
-    ::-webkit-scrollbar-thumb { background:#E8D090; border-radius:3px; }
-    @media print { .np { display:none!important; } }
-  </style>
+  <style>* { margin:0; padding:0; box-sizing:border-box; } body { background:#FFFDF7; } @media print { .np { display:none!important; } }</style>
 </head>
 <body>
   <div id="root"></div>
@@ -21,7 +13,6 @@
   <script src="https://unpkg.com/@babel/standalone@7.23.6/babel.min.js"></script>
   <script type="text/babel" data-presets="react">
     const { useState, useMemo, useEffect } = React;
-
 
 const useScreen = () => {
   const [w, setW] = useState(typeof window !== "undefined" ? window.innerWidth : 1200);
@@ -54,7 +45,7 @@ const CURRENCIES = [
 // ── DAFTRA API ─────────────────────────────────────────────
 // ── DAFTRA OAUTH + API ────────────────────────────────────
 const CLIENT_ID   = "555";
-const OAUTH_URL   = `https://app.daftra.com/oauth/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent("https://clink-menu.vercel.app/callback")}&response_type=code&scope=read`;
+const OAUTH_URL   = `https://app.daftra.com/oauth/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent("https://clink-menu.vercel.app/callback")}&response_type=code`;
 const REFRESH_KEY = "clink_menu_token";
 const SUB_KEY     = "clink_menu_sub";
 
@@ -729,10 +720,7 @@ function App() {
     </>
   );
 }
-
-    ReactDOM.createRoot(document.getElementById("root")).render(
-      React.createElement(App)
-    );
+    ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
   </script>
 </body>
 </html>
