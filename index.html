@@ -52,19 +52,68 @@ const CURRENCIES = [
 ];
 
 // ── DAFTRA API ─────────────────────────────────────────────
+// ── DAFTRA OAUTH + API ────────────────────────────────────
+const CLIENT_ID   = "555";
+const OAUTH_URL   = `https://app.daftra.com/oauth/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent("https://clink-menu.vercel.app/callback")}&response_type=code&scope=read`;
+const REFRESH_KEY = "clink_menu_token";
+const SUB_KEY     = "clink_menu_sub";
+
 const DaftraAPI = {
-  async getProducts(sub, key) {
-    const r = await fetch(`https://${sub}.daftra.com/api2/products.json?limit=100`, {
-      headers: { apikey: key, Accept: "application/json" }
-    });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const data = await r.json();
-    return data.data.map((item, i) => ({
-      id: i + 1, name: item.Product.name,
-      price: parseFloat(item.Product.buy_price) || 0,
-      unit: "كجم", category: item.Product.ProductCategory?.[0]?.name || "عام",
-      stock: item.Product.stock_balance || 0,
+  // ── OAuth: توجيه المستخدم لدفترة ──────────────────────
+  startOAuth() {
+    window.location.href = OAUTH_URL;
+  },
+
+  // ── قراءة Token المحفوظ ────────────────────────────────
+  getToken() {
+    try { return sessionStorage.getItem(REFRESH_KEY); } catch { return null; }
+  },
+  getSubdomain() {
+    try { return sessionStorage.getItem(SUB_KEY); } catch { return null; }
+  },
+  saveToken(token, sub) {
+    try {
+      sessionStorage.setItem(REFRESH_KEY, token);
+      if (sub) sessionStorage.setItem(SUB_KEY, sub);
+    } catch {}
+  },
+  clearToken() {
+    try {
+      sessionStorage.removeItem(REFRESH_KEY);
+      sessionStorage.removeItem(SUB_KEY);
+    } catch {}
+  },
+
+  // ── طلب API عبر الوسيط /api/daftra ────────────────────
+  async req(token, sub, ep) {
+    const url = `/api/daftra?subdomain=${encodeURIComponent(sub)}&apikey=${encodeURIComponent(token)}&endpoint=${encodeURIComponent(ep)}`;
+    const r = await fetch(url);
+    if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e.message||`HTTP ${r.status}`); }
+    return r.json();
+  },
+
+  // ── جلب المنتجات ────────────────────────────────────
+  async getProducts(token, sub) {
+    const data = await DaftraAPI.req(token, sub, "products.json?limit=200");
+    if (!data.data) throw new Error("لا توجد بيانات من دفترة");
+    return data.data.map((item,i) => ({
+      id: i+1,
+      name: item.Product.name||"منتج",
+      nameEN: item.Product.name||"Product",
+      price: parseFloat(item.Product.buy_price)||0,
+      unit:"كجم", unitEN:"kg",
+      category: item.Product.ProductCategory?.[0]?.name||"عام",
+      catEN: item.Product.ProductCategory?.[0]?.name||"General",
+      stock: parseFloat(item.Product.stock_balance)||0,
     }));
+  },
+
+  // ── اتصال بـ API Key (بديل للـ OAuth) ─────────────────
+  async connectWithKey(sub, key) {
+    const url = `/api/daftra?subdomain=${encodeURIComponent(sub)}&apikey=${encodeURIComponent(key)}&endpoint=products.json?limit=1`;
+    const r = await fetch(url);
+    if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e.message||`HTTP ${r.status}`); }
+    return { success: true };
   },
 };
 
@@ -101,7 +150,8 @@ function App() {
   const [lang, setLang]       = useState("AR");
   const [currency, setCurrency] = useState(CURRENCIES[0]);
   const [showCurr, setShowCurr] = useState(false);
-  const [connection, setConnection] = useState({subdomain:"", apiKey:"", status:"disconnected"});
+  const [connection, setConnection] = useState({subdomain:"", apiKey:"", status:"disconnected", token:""});
+  const [authLoading, setAuthLoading] = useState(false);
   const [ingredients, setIngredients] = useState(DEMO_ING);
   const [recipes, setRecipes]         = useState(DEMO_RECIPES);
   const [alert, setAlert]             = useState(null);
@@ -145,20 +195,94 @@ function App() {
   };
 
   // ── CONNECT DAFTRA ────────────────────────────────────────
-  const connectDaftra = async () => {
-    if (!connection.subdomain || !connection.apiKey) return toast(ar?"أدخل النطاق ومفتاح API":"Enter subdomain and API key", "error");
-    setConnection(c => ({...c, status:"connecting"}));
-    try {
-      const products = await DaftraAPI.getProducts(connection.subdomain, connection.apiKey);
-      setIngredients(products.map((p, i) => ({...p, id:i+1, nameEN:p.name, unitEN:p.unit, catEN:p.category})));
-      setConnection(c => ({...c, status:"connected"}));
-      toast(ar?`تم! جُلب ${products.length} مكوّن`:`Connected! ${products.length} items loaded`);
-      setPage(PAGES.DASHBOARD);
-    } catch {
-      setConnection(c => ({...c, status:"demo"}));
-      toast(ar?"وضع التجربة — يعمل كاملاً بعد النشر على دفترة":"Demo mode — full connection after Daftra publish", "warn");
-      setPage(PAGES.DASHBOARD);
+  // ── معالجة OAuth Callback تلقائياً ─────────────────────
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const auth = params.get("auth");
+    if (auth === "success") {
+      const token = params.get("token");
+      const sub   = params.get("subdomain");
+      if (token) {
+        DaftraAPI.saveToken(token, sub);
+        setConnection(c => ({...c, status:"connecting", token, subdomain:sub||""}));
+        setAuthLoading(true);
+        // جلب المنتجات تلقائياً
+        DaftraAPI.getProducts(token, sub || connection.subdomain).then(products => {
+          setIngredients(products);
+          setConnection(c => ({...c, status:"connected"}));
+          setAuthLoading(false);
+          toast(ar?`✅ مرحباً! جُلب ${products.length} مكوّن من دفترة`:`✅ Welcome! ${products.length} items loaded from Daftra`);
+          setPage(PAGES.DASHBOARD);
+          // تنظيف URL
+          window.history.replaceState({}, "", "/");
+        }).catch(err => {
+          setAuthLoading(false);
+          toast(ar?"❌ تعذّر جلب البيانات":"❌ Failed to load data","error");
+        });
+      }
+    } else if (auth === "error") {
+      const reason = params.get("reason");
+      toast(ar?`❌ فشل تسجيل الدخول: ${reason}`:`❌ Login failed: ${reason}`,"error");
+      window.history.replaceState({}, "", "/");
     }
+
+    // استعادة Token المحفوظ من جلسة سابقة
+    const savedToken = DaftraAPI.getToken();
+    const savedSub   = DaftraAPI.getSubdomain();
+    if (savedToken && savedSub) {
+      setConnection(c => ({...c, status:"connected", token:savedToken, subdomain:savedSub}));
+    }
+  }, []);
+
+  // ── اتصال بـ OAuth (زر واحد) ─────────────────────────
+  const connectOAuth = () => {
+    DaftraAPI.startOAuth();
+  };
+
+  // ── اتصال بـ API Key (يدوي) ──────────────────────────
+  const connectDaftra = async () => {
+    if (!connection.subdomain || !connection.apiKey) {
+      return toast(ar?"أدخل النطاق ومفتاح API":"Enter subdomain and API key","error");
+    }
+    setConnection(c=>({...c,status:"connecting"}));
+    try {
+      await DaftraAPI.connectWithKey(connection.subdomain, connection.apiKey);
+      const products = await DaftraAPI.getProducts(connection.apiKey, connection.subdomain);
+      DaftraAPI.saveToken(connection.apiKey, connection.subdomain);
+      setIngredients(products);
+      setConnection(c=>({...c,status:"connected",token:connection.apiKey}));
+      toast(ar?`✅ تم! جُلب ${products.length} مكوّن`:`✅ Connected! ${products.length} items`);
+      setPage(PAGES.DASHBOARD);
+    } catch(err) {
+      const msg = err.message||"";
+      if(msg.includes("401")||msg.includes("API")) toast(ar?"❌ مفتاح API غير صحيح":"❌ Invalid API Key","error");
+      else if(msg.includes("404")) toast(ar?"❌ النطاق غير موجود":"❌ Subdomain not found","error");
+      else toast(ar?`❌ ${msg}`:`❌ ${msg}`,"error");
+      setConnection(c=>({...c,status:"disconnected"}));
+    }
+  };
+
+  // ── تحديث تلقائي كل 5 دقائق ─────────────────────────
+  useEffect(() => {
+    if (connection.status !== "connected" || !connection.token) return;
+    const interval = setInterval(async () => {
+      try {
+        const products = await DaftraAPI.getProducts(
+          connection.token,
+          DaftraAPI.getSubdomain() || connection.subdomain
+        );
+        setIngredients(products);
+      } catch {}
+    }, 5 * 60 * 1000); // كل 5 دقائق
+    return () => clearInterval(interval);
+  }, [connection.status, connection.token]);
+
+  // ── قطع الاتصال ──────────────────────────────────────
+  const disconnect = () => {
+    DaftraAPI.clearToken();
+    setConnection({subdomain:"",apiKey:"",status:"disconnected",token:""});
+    setIngredients(DEMO_ING);
+    toast(ar?"تم قطع الاتصال":"Disconnected");
   };
 
   // ── CALCULATIONS ──────────────────────────────────────────
@@ -178,9 +302,9 @@ function App() {
   // ── STATUS COLORS ─────────────────────────────────────────
   const statusColors = {disconnected:C.textFaint, connecting:C.warning, connected:C.positive, demo:C.warning};
   const statusLabels = {
-    disconnected: ar?"غير متصل":"Disconnected",
+    disconnected: ar?"اضغط للاتصال":"Tap to Connect",
     connecting:   ar?"جاري...":"Connecting...",
-    connected:    ar?"متصل بدفترة":"Connected",
+    connected:    ar?"✅ متصل بدفترة":"✅ Connected to Daftra",
     demo:         ar?"وضع تجربة":"Demo Mode",
   };
 
@@ -322,11 +446,19 @@ function App() {
             ))}
           </div>
         </div>
+        {/* الطريقة الأولى — OAuth تلقائي */}
+        <button onClick={connectOAuth} style={{width:"100%",padding:"12px",borderRadius:10,border:"none",background:`linear-gradient(135deg,${C.gold},${C.goldDark})`,color:"white",fontSize:14,fontWeight:800,cursor:"pointer",fontFamily:"inherit",marginBottom:10,boxShadow:`0 4px 14px ${C.gold}50`,display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+          <span style={{fontSize:20}}>🔗</span>
+          {ar?"تسجيل دخول بدفترة (موصى به)":"Login with Daftra (Recommended)"}
+        </button>
+        <div style={{textAlign:"center",fontSize:11,color:C.textFaint,marginBottom:10}}>
+          {ar?"— أو أدخل API Key يدوياً —":"— or enter API Key manually —"}
+        </div>
         <div style={{display:"flex",gap:10}}>
-          <button onClick={connectDaftra} disabled={connection.status==="connecting"} style={{padding:"9px 18px",borderRadius:8,border:"none",background:`linear-gradient(135deg,${C.gold},${C.goldDark})`,color:"white",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
-            {connection.status==="connecting"?(ar?"جاري...":"Connecting..."):(ar?"اتصال بدفترة":"Connect to Daftra")}
+          <button onClick={connectDaftra} disabled={connection.status==="connecting"} style={{flex:1,padding:"9px",borderRadius:8,border:`1px solid ${C.border}`,background:C.white,color:C.goldDark,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+            {connection.status==="connecting"?(ar?"جاري...":"Connecting..."):(ar?"اتصال بـ API Key":"Connect with API Key")}
           </button>
-          <button onClick={() => {setConnection(c=>({...c,status:"demo"})); setPage(PAGES.DASHBOARD);}} style={{padding:"9px 18px",borderRadius:8,border:`1px solid ${C.border}`,background:C.goldLight,color:C.goldDark,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+          <button onClick={() => {setConnection(c=>({...c,status:"demo"})); setPage(PAGES.DASHBOARD);}} style={{flex:1,padding:"9px",borderRadius:8,border:`1px solid ${C.border}`,background:C.goldLight,color:C.goldDark,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
             {ar?"تجربة بدون اتصال":"Demo Mode"}
           </button>
         </div>
