@@ -1,666 +1,788 @@
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
-<meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>CLink· CFO Dashboard v5</title>
-<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap" rel="stylesheet"/>
-<script crossorigin src="https://unpkg.com/react@18.2.0/umd/react.production.min.js"></script>
-<script crossorigin src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
-
-<style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{background:#FFFDF7;font-family:'Cairo',sans-serif}
-::-webkit-scrollbar{width:5px;height:5px}
-::-webkit-scrollbar-track{background:#FEF8ED}
-::-webkit-scrollbar-thumb{background:#E8D090;border-radius:3px}
-@media print{.np{display:none!important}}
-@keyframes spin{to{transform:rotate(360deg)}}
-@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
-@keyframes slideIn{from{opacity:0;transform:translateX(16px)}to{opacity:1;transform:translateX(0)}}
-</style>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>CLink Menu | حاسبة تكلفة المطاعم</title>
+  <style>* { margin:0; padding:0; box-sizing:border-box; } body { background:#FFFDF7; } @media print { .np { display:none!important; } }</style>
 </head>
 <body>
-<div id="root"></div>
-<script>
-window.addEventListener('load', function() {
-if (typeof React === 'undefined') {
-  document.getElementById('root').innerHTML = '<div style="padding:40px;text-align:center;font-family:sans-serif"><h2>⚠️ خطأ في تحميل React</h2><p>تحقق من اتصال الإنترنت ثم أعد تحميل الصفحة</p></div>';
-  return;
+  <div id="root"></div>
+  <script crossorigin src="https://unpkg.com/react@18.2.0/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.23.6/babel.min.js"></script>
+  <script type="text/babel" data-presets="react">
+    const { useState, useMemo, useEffect } = React;
+
+const useScreen = () => {
+  const [w, setW] = useState(typeof window !== "undefined" ? window.innerWidth : 1200);
+  useEffect(() => { const fn = () => setW(window.innerWidth); window.addEventListener("resize", fn); return () => window.removeEventListener("resize", fn); }, []);
+  return { isMobile: w < 640, isTablet: w >= 640 && w < 1024 };
+};
+
+// ── THEME ──────────────────────────────────────────────────
+const C = {
+  bg:"#FFFDF7", surface:"#FEF8ED", surface2:"#FDF3D8",
+  border:"#E8D090", borderSoft:"#F2E4B0",
+  gold:"#C8A84B", goldDark:"#9B7820", goldPale:"#C8A84B18", goldLight:"#FFF8E0",
+  text:"#1E1408", textDim:"#5C4020", textFaint:"#9B7840",
+  positive:"#1A6B1A", negative:"#B03020", warning:"#C07010",
+  info:"#1A5C8A", white:"#FFFFFF",
+  shadow:"0 2px 12px rgba(200,168,75,0.12)",
+};
+
+// ── CURRENCIES ─────────────────────────────────────────────
+const CURRENCIES = [
+  {code:"EGP",sym:"ج.م",  symEN:"EGP",name:"الجنيه المصري",   nameEN:"Egyptian Pound",  flag:"🇪🇬"},
+  {code:"SAR",sym:"ر.س",  symEN:"SAR",name:"الريال السعودي",  nameEN:"Saudi Riyal",     flag:"🇸🇦"},
+  {code:"AED",sym:"د.إ",  symEN:"AED",name:"الدرهم الإماراتي",nameEN:"UAE Dirham",      flag:"🇦🇪"},
+  {code:"KWD",sym:"د.ك",  symEN:"KWD",name:"الدينار الكويتي", nameEN:"Kuwaiti Dinar",   flag:"🇰🇼"},
+  {code:"BHD",sym:"د.ب",  symEN:"BHD",name:"الدينار البحريني",nameEN:"Bahraini Dinar",  flag:"🇧🇭"},
+  {code:"QAR",sym:"ر.ق",  symEN:"QAR",name:"الريال القطري",   nameEN:"Qatari Riyal",    flag:"🇶🇦"},
+  {code:"JOD",sym:"د.أ",  symEN:"JOD",name:"الدينار الأردني", nameEN:"Jordanian Dinar", flag:"🇯🇴"},
+];
+
+// ── DAFTRA API ─────────────────────────────────────────────
+// ── DAFTRA OAUTH + API ────────────────────────────────────
+const CLIENT_ID   = "555";
+const OAUTH_URL   = `https://app.daftra.com/oauth/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent("https://clink-menu.vercel.app/callback")}&response_type=code`;
+const REFRESH_KEY = "clink_menu_token";
+const SUB_KEY     = "clink_menu_sub";
+
+const DaftraAPI = {
+  // ── OAuth: توجيه المستخدم لدفترة ──────────────────────
+  startOAuth() {
+    window.location.href = OAUTH_URL;
+  },
+
+  // ── قراءة Token المحفوظ ────────────────────────────────
+  getToken() {
+    try { return sessionStorage.getItem(REFRESH_KEY); } catch { return null; }
+  },
+  getSubdomain() {
+    try { return sessionStorage.getItem(SUB_KEY); } catch { return null; }
+  },
+  saveToken(token, sub) {
+    try {
+      sessionStorage.setItem(REFRESH_KEY, token);
+      if (sub) sessionStorage.setItem(SUB_KEY, sub);
+    } catch {}
+  },
+  clearToken() {
+    try {
+      sessionStorage.removeItem(REFRESH_KEY);
+      sessionStorage.removeItem(SUB_KEY);
+    } catch {}
+  },
+
+  // ── طلب API عبر الوسيط /api/daftra ────────────────────
+  async req(token, sub, ep) {
+    const url = `/api/daftra?subdomain=${encodeURIComponent(sub)}&apikey=${encodeURIComponent(token)}&endpoint=${encodeURIComponent(ep)}`;
+    const r = await fetch(url);
+    if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e.message||`HTTP ${r.status}`); }
+    return r.json();
+  },
+
+  // ── جلب المنتجات ────────────────────────────────────
+  async getProducts(token, sub) {
+    const data = await DaftraAPI.req(token, sub, "products.json?limit=200");
+    if (!data.data) throw new Error("لا توجد بيانات من دفترة");
+    return data.data.map((item,i) => ({
+      id: i+1,
+      name: item.Product.name||"منتج",
+      nameEN: item.Product.name||"Product",
+      price: parseFloat(item.Product.buy_price)||0,
+      unit:"كجم", unitEN:"kg",
+      category: item.Product.ProductCategory?.[0]?.name||"عام",
+      catEN: item.Product.ProductCategory?.[0]?.name||"General",
+      stock: parseFloat(item.Product.stock_balance)||0,
+    }));
+  },
+
+  // ── اتصال بـ API Key (بديل للـ OAuth) ─────────────────
+  async connectWithKey(sub, key) {
+    const url = `/api/daftra?subdomain=${encodeURIComponent(sub)}&apikey=${encodeURIComponent(key)}&endpoint=products.json?limit=1`;
+    const r = await fetch(url);
+    if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e.message||`HTTP ${r.status}`); }
+    return { success: true };
+  },
+};
+
+// ── DEMO DATA ──────────────────────────────────────────────
+const DEMO_ING = [
+  {id:1, name:"دجاج مشوي",   nameEN:"Grilled Chicken", unit:"كجم", unitEN:"kg",  price:85,  category:"بروتين",  catEN:"Protein",     stock:15},
+  {id:2, name:"أرز بسمتي",   nameEN:"Basmati Rice",    unit:"كجم", unitEN:"kg",  price:22,  category:"حبوب",    catEN:"Grains",      stock:50},
+  {id:3, name:"زيت زيتون",   nameEN:"Olive Oil",       unit:"لتر", unitEN:"ltr", price:95,  category:"زيوت",    catEN:"Oils",        stock:8},
+  {id:4, name:"طماطم",       nameEN:"Tomatoes",        unit:"كجم", unitEN:"kg",  price:12,  category:"خضروات",  catEN:"Vegetables",  stock:20},
+  {id:5, name:"بصل",         nameEN:"Onion",           unit:"كجم", unitEN:"kg",  price:8,   category:"خضروات",  catEN:"Vegetables",  stock:25},
+  {id:6, name:"ثوم",         nameEN:"Garlic",          unit:"كجم", unitEN:"kg",  price:35,  category:"توابل",   catEN:"Spices",      stock:5},
+  {id:7, name:"جبن موزاريلا",nameEN:"Mozzarella",      unit:"كجم", unitEN:"kg",  price:120, category:"ألبان",   catEN:"Dairy",       stock:10},
+  {id:8, name:"عجينة بيتزا", nameEN:"Pizza Dough",     unit:"كجم", unitEN:"kg",  price:18,  category:"حبوب",    catEN:"Grains",      stock:30},
+  {id:9, name:"لحم بقري",    nameEN:"Beef",            unit:"كجم", unitEN:"kg",  price:180, category:"بروتين",  catEN:"Protein",     stock:12},
+  {id:10,name:"خس روماني",   nameEN:"Romaine Lettuce", unit:"كجم", unitEN:"kg",  price:20,  category:"خضروات",  catEN:"Vegetables",  stock:18},
+];
+
+const DEMO_RECIPES = [
+  {id:1, name:"دجاج مشوي مع أرز",  nameEN:"Grilled Chicken & Rice", category:"أطباق رئيسية", catEN:"Main Dishes",  sellingPrice:95,  portions:1, ingredients:[{ingredientId:1,qty:0.25},{ingredientId:2,qty:0.15},{ingredientId:3,qty:0.02},{ingredientId:5,qty:0.05}]},
+  {id:2, name:"بيتزا مارغريتا",     nameEN:"Margherita Pizza",       category:"بيتزا",        catEN:"Pizza",        sellingPrice:85,  portions:1, ingredients:[{ingredientId:8,qty:0.3},{ingredientId:7,qty:0.15},{ingredientId:4,qty:0.2},{ingredientId:3,qty:0.02}]},
+  {id:3, name:"برجر لحم بقري",      nameEN:"Beef Burger",            category:"برجر",         catEN:"Burger",       sellingPrice:120, portions:1, ingredients:[{ingredientId:9,qty:0.2},{ingredientId:4,qty:0.05},{ingredientId:5,qty:0.03},{ingredientId:6,qty:0.01}]},
+];
+
+const PAGES = {SETUP:"setup", DASHBOARD:"dashboard", INGREDIENTS:"ingredients", RECIPES:"recipes", REPORTS:"reports"};
+
+const getColor = pct => pct <= 28 ? C.positive : pct <= 35 ? C.warning : C.negative;
+const getLabel = (pct, ar) => pct <= 28 ? (ar?"ممتاز":"Excellent") : pct <= 35 ? (ar?"مقبول":"Acceptable") : (ar?"مرتفع":"High");
+
+const fmt = n => new Intl.NumberFormat("ar-EG").format(Math.round(n * 100) / 100);
+
+function App() {
+  const { isMobile, isTablet } = useScreen();
+  const [page, setPage]       = useState(PAGES.SETUP);
+  const [lang, setLang]       = useState("AR");
+  const [currency, setCurrency] = useState(CURRENCIES[0]);
+  const [showCurr, setShowCurr] = useState(false);
+  const [connection, setConnection] = useState({subdomain:"", apiKey:"", status:"disconnected", token:""});
+  const [authLoading, setAuthLoading] = useState(false);
+  const [ingredients, setIngredients] = useState(DEMO_ING);
+  const [recipes, setRecipes]         = useState(DEMO_RECIPES);
+  const [alert, setAlert]             = useState(null);
+  const [showIngForm, setShowIngForm] = useState(false);
+  const [showRecipeForm, setShowRecipeForm] = useState(false);
+  const [editingRecipe, setEditingRecipe]   = useState(null);
+  const [newIng, setNewIng]   = useState({name:"", nameEN:"", unit:"كجم", unitEN:"kg", price:"", category:"خضروات", catEN:"Vegetables"});
+  const [newRecipe, setNewRecipe] = useState({name:"", nameEN:"", category:"أطباق رئيسية", catEN:"Main Dishes", sellingPrice:"", portions:1, ingredients:[]});
+  const [recipeIngRow, setRecipeIngRow] = useState({ingredientId:"", qty:""});
+
+  const ar  = lang === "AR";
+  const dir = ar ? "rtl" : "ltr";
+  const SY  = ar ? currency.sym : currency.symEN;
+  const sidebarW = isMobile ? 0 : isTablet ? 70 : 230;
+
+  const toast = (msg, type="success") => { setAlert({msg, type}); setTimeout(() => setAlert(null), 3000); };
+
+  // ── EXPORT FUNCTIONS ──────────────────────────────────────
+  const doPrint = () => window.print();
+
+  const doExcel = () => {
+    const header = ar
+      ? ["الوصفة","التصنيف","تكلفة الطبق","سعر البيع","هامش الربح","نسبة التكلفة %","الحالة"]
+      : ["Recipe","Category","Cost","Selling Price","Profit","Food Cost %","Status"];
+    const rows = enriched.map(r => [
+      ar ? r.name : (r.nameEN || r.name),
+      ar ? r.category : (r.catEN || r.category),
+      r.cost.toFixed(2),
+      r.sellingPrice,
+      r.profit.toFixed(2),
+      r.pct.toFixed(1)+"%",
+      getLabel(r.pct, ar),
+    ]);
+    const csv = [header, ...rows].map(row => row.join(",")).join("\n");
+    const blob = new Blob(["\uFEFF" + csv], {type:"text/csv"});
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "CLink_Menu_Report.csv";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  // ── CONNECT DAFTRA ────────────────────────────────────────
+  // ── معالجة OAuth Callback تلقائياً ─────────────────────
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const auth = params.get("auth");
+
+    const loadProducts = async (token, sub, tokenType) => {
+      setAuthLoading(true);
+      try {
+        let products = null;
+        const types = tokenType === "bearer" ? ["bearer","apikey"] : ["apikey","bearer"];
+        for (const t of types) {
+          try {
+            const url = `/api/daftra?subdomain=${encodeURIComponent(sub||"")}&apikey=${encodeURIComponent(token)}&endpoint=products.json?limit=200&token_type=${t}`;
+            const r = await fetch(url);
+            if (!r.ok) continue;
+            const data = await r.json();
+            if (data.data) {
+              products = data.data.map((item,i) => ({
+                id: i+1,
+                name: item.Product?.name || "منتج",
+                nameEN: item.Product?.name || "Product",
+                price: parseFloat(item.Product?.buy_price) || 0,
+                unit: "كجم", unitEN: "kg",
+                category: item.Product?.ProductCategory?.[0]?.name || "عام",
+                catEN: item.Product?.ProductCategory?.[0]?.name || "General",
+                stock: parseFloat(item.Product?.stock_balance) || 0,
+              }));
+              DaftraAPI.saveToken(token, sub||"");
+              break;
+            }
+          } catch {}
+        }
+
+        // ── مسح البيانات التجريبية دائماً عند الاتصال ──────
+        setIngredients(products && products.length > 0 ? products : []);
+        setRecipes([]);
+        setConnection(c => ({...c, status:"connected", token}));
+
+        if (products && products.length > 0) {
+          toast(ar?`✅ تم الاتصال! جُلب ${products.length} منتج من دفترة`:`✅ Connected! ${products.length} products from Daftra`);
+        } else {
+          toast(ar?"✅ تم الاتصال بدفترة! لا توجد منتجات — أضفها من دفترة":"✅ Connected! No products found — add them in Daftra");
+        }
+        setPage(PAGES.DASHBOARD);
+
+      } catch(err) {
+        toast(ar?"❌ تعذّر جلب البيانات":"❌ Failed to load data","error");
+        setConnection(c => ({...c, status:"disconnected"}));
+      } finally {
+        setAuthLoading(false);
+        window.history.replaceState({}, "", "/");
+      }
+    };
+
+    if (auth === "success") {
+      const token     = params.get("token");
+      const sub       = params.get("subdomain");
+      const tokenType = params.get("token_type") || "apikey";
+      if (token) loadProducts(token, sub, tokenType);
+
+    } else if (auth === "code") {
+      // Fallback: code مباشر — نستخدمه كـ API key
+      const code = params.get("code");
+      if (code) loadProducts(code, "", "apikey");
+
+    } else if (auth === "error") {
+      const reason = params.get("reason") || "unknown";
+      toast(ar?`❌ فشل: ${reason}`:`❌ Failed: ${reason}`,"error");
+      window.history.replaceState({}, "", "/");
+    }
+
+    // استعادة جلسة سابقة + إعادة جلب البيانات
+    const savedToken = DaftraAPI.getToken();
+    const savedSub   = DaftraAPI.getSubdomain();
+    if (savedToken && !auth) {
+      setConnection(c => ({...c, status:"connected", token:savedToken, subdomain:savedSub||""}));
+      // إعادة جلب المنتجات من دفترة
+      loadProducts(savedToken, savedSub||"", "apikey");
+    }
+  }, []);
+
+  // ── اتصال بـ OAuth (زر واحد) ─────────────────────────
+  const connectOAuth = () => {
+    DaftraAPI.startOAuth();
+  };
+
+  // ── اتصال بـ API Key (يدوي) ──────────────────────────
+  const connectDaftra = async () => {
+    if (!connection.subdomain || !connection.apiKey) {
+      return toast(ar?"أدخل النطاق ومفتاح API":"Enter subdomain and API key","error");
+    }
+    setConnection(c=>({...c,status:"connecting"}));
+    try {
+      await DaftraAPI.connectWithKey(connection.subdomain, connection.apiKey);
+      const products = await DaftraAPI.getProducts(connection.apiKey, connection.subdomain);
+      DaftraAPI.saveToken(connection.apiKey, connection.subdomain);
+      setIngredients(products);
+      setConnection(c=>({...c,status:"connected",token:connection.apiKey}));
+      toast(ar?`✅ تم! جُلب ${products.length} مكوّن`:`✅ Connected! ${products.length} items`);
+      setPage(PAGES.DASHBOARD);
+    } catch(err) {
+      const msg = err.message||"";
+      if(msg.includes("401")||msg.includes("API")) toast(ar?"❌ مفتاح API غير صحيح":"❌ Invalid API Key","error");
+      else if(msg.includes("404")) toast(ar?"❌ النطاق غير موجود":"❌ Subdomain not found","error");
+      else toast(ar?`❌ ${msg}`:`❌ ${msg}`,"error");
+      setConnection(c=>({...c,status:"disconnected"}));
+    }
+  };
+
+  // ── تحديث تلقائي كل 5 دقائق ─────────────────────────
+  useEffect(() => {
+    if (connection.status !== "connected" || !connection.token) return;
+    const interval = setInterval(async () => {
+      try {
+        const products = await DaftraAPI.getProducts(
+          connection.token,
+          DaftraAPI.getSubdomain() || connection.subdomain
+        );
+        setIngredients(products);
+      } catch {}
+    }, 5 * 60 * 1000); // كل 5 دقائق
+    return () => clearInterval(interval);
+  }, [connection.status, connection.token]);
+
+  // ── قطع الاتصال ──────────────────────────────────────
+  const disconnect = () => {
+    DaftraAPI.clearToken();
+    setConnection({subdomain:"",apiKey:"",status:"disconnected",token:""});
+    setIngredients(DEMO_ING);
+    toast(ar?"تم قطع الاتصال":"Disconnected");
+  };
+
+  // ── CALCULATIONS ──────────────────────────────────────────
+  const calcCost = recipe => recipe.ingredients.reduce((sum, ri) => {
+    const ing = ingredients.find(i => i.id === ri.ingredientId);
+    return sum + (ing ? ing.price * ri.qty : 0);
+  }, 0);
+
+  const enriched = useMemo(() => recipes.map(r => {
+    const cost = calcCost(r);
+    const pct  = r.sellingPrice > 0 ? (cost / r.sellingPrice) * 100 : 0;
+    return {...r, cost, pct, profit: r.sellingPrice - cost};
+  }), [recipes, ingredients]);
+
+  const avgFC = useMemo(() => enriched.length ? enriched.reduce((s,r) => s+r.pct, 0) / enriched.length : 0, [enriched]);
+
+  // ── STATUS COLORS ─────────────────────────────────────────
+  const statusColors = {disconnected:C.textFaint, connecting:C.warning, connected:C.positive, demo:C.warning};
+  const statusLabels = {
+    disconnected: ar?"اضغط للاتصال":"Tap to Connect",
+    connecting:   ar?"جاري...":"Connecting...",
+    connected:    ar?"✅ متصل بدفترة":"✅ Connected to Daftra",
+    demo:         ar?"وضع تجربة":"Demo Mode",
+  };
+
+  // ── NAV ───────────────────────────────────────────────────
+  const navItems = [
+    {id:PAGES.DASHBOARD,   icon:"◈", ar:"الرئيسية",   en:"Dashboard"},
+    {id:PAGES.INGREDIENTS, icon:"⊞", ar:"المكوّنات",  en:"Ingredients"},
+    {id:PAGES.RECIPES,     icon:"✦", ar:"الوصفات",    en:"Recipes"},
+    {id:PAGES.REPORTS,     icon:"◎", ar:"التقارير",   en:"Reports"},
+    {id:PAGES.SETUP,       icon:"⚙", ar:"الإعدادات",  en:"Settings"},
+  ];
+
+  // ── LOGO ─────────────────────────────────────────────────
+  const Logo = () => (
+    <div style={{display:"flex",alignItems:"center",gap:8}}>
+      <svg width={30} height={30} viewBox="0 0 48 48">
+        <rect width="48" height="48" rx="11" fill={C.gold}/>
+        <path d="M 33.19 14.81 A 13 13 0 1 0 33.19 33.19" fill="none" stroke="white" strokeWidth="3.5" strokeLinecap="round"/>
+        <circle cx="33.19" cy="14.81" r="3" fill="white"/>
+        <circle cx="33.19" cy="33.19" r="3" fill="white"/>
+        <line x1="36" y1="14.81" x2="43" y2="14.81" stroke="white" strokeWidth="1.5" strokeDasharray="2 2" opacity=".7"/>
+        <line x1="36" y1="33.19" x2="43" y2="33.19" stroke="white" strokeWidth="1.5" strokeDasharray="2 2" opacity=".7"/>
+        <circle cx="44.5" cy="24" r="2" fill="white" opacity=".85"/>
+      </svg>
+      <div>
+        <div style={{fontSize:15,fontWeight:900,color:C.goldDark,lineHeight:1,fontFamily:"Georgia,serif"}}>CLink<span style={{color:C.gold}}>·</span></div>
+        <div style={{fontSize:8,color:C.gold,letterSpacing:2,fontWeight:700,textTransform:"uppercase"}}>Menu App</div>
+      </div>
+    </div>
+  );
+
+  // ── SIDEBAR ───────────────────────────────────────────────
+  const Sidebar = () => (
+    <div style={{width:sidebarW,background:C.white,position:"fixed",top:0,[ar?"right":"left"]:0,bottom:0,zIndex:20,borderLeft:ar?`1px solid ${C.border}`:"none",borderRight:!ar?`1px solid ${C.border}`:"none",display:"flex",flexDirection:"column",boxShadow:C.shadow}}>
+      <div style={{padding:isTablet?"12px 8px":"14px 14px",borderBottom:`1px solid ${C.borderSoft}`}}>
+        {isTablet ? (
+          <svg width={32} height={32} viewBox="0 0 48 48"><rect width="48" height="48" rx="11" fill={C.gold}/><path d="M 33.19 14.81 A 13 13 0 1 0 33.19 33.19" fill="none" stroke="white" strokeWidth="3.5" strokeLinecap="round"/><circle cx="33.19" cy="14.81" r="3" fill="white"/><circle cx="33.19" cy="33.19" r="3" fill="white"/></svg>
+        ) : <Logo/>}
+        {!isTablet && (
+          <div style={{marginTop:10,padding:"6px 10px",background:C.goldLight,borderRadius:8,border:`1px solid ${C.border}`,display:"flex",alignItems:"center",gap:6}}>
+            <span style={{fontSize:14}}>⬡</span>
+            <div>
+              <div style={{fontSize:10,fontWeight:700,color:C.goldDark}}>{ar?"حاسبة التكلفة":"Cost Calculator"}</div>
+              <div style={{fontSize:9,color:C.textFaint}}>{currency.flag} {SY}</div>
+            </div>
+          </div>
+        )}
+      </div>
+      <nav style={{flex:1,padding:isTablet?"8px 6px":"10px 8px"}}>
+        {navItems.map(item => (
+          <div key={item.id} onClick={() => setPage(item.id)} style={{display:"flex",alignItems:"center",gap:isTablet?0:8,justifyContent:isTablet?"center":"flex-start",padding:isTablet?"10px":"8px 10px",borderRadius:8,marginBottom:2,cursor:"pointer",background:page===item.id?C.goldPale:"transparent",border:`1px solid ${page===item.id?C.gold+"50":"transparent"}`,color:page===item.id?C.gold:C.textFaint,fontWeight:page===item.id?700:400,fontSize:12}}>
+            <span style={{fontSize:14}}>{item.icon}</span>
+            {!isTablet && <span>{ar?item.ar:item.en}</span>}
+          </div>
+        ))}
+      </nav>
+      <div style={{padding:"8px 12px",borderTop:`1px solid ${C.borderSoft}`}}>
+        <div style={{display:"flex",alignItems:"center",gap:5}}>
+          <div style={{width:7,height:7,borderRadius:"50%",background:statusColors[connection.status]}}/>
+          {!isTablet && <span style={{fontSize:10,color:statusColors[connection.status],fontWeight:600}}>{statusLabels[connection.status]}</span>}
+        </div>
+      </div>
+    </div>
+  );
+
+  const BottomNav = () => (
+    <div style={{position:"fixed",bottom:0,left:0,right:0,background:C.white,borderTop:`1px solid ${C.border}`,display:"flex",zIndex:20}}>
+      {navItems.map(item => (
+        <div key={item.id} onClick={() => setPage(item.id)} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"6px 2px",cursor:"pointer",color:page===item.id?C.gold:C.textFaint,borderTop:`2px solid ${page===item.id?C.gold:"transparent"}`,background:page===item.id?C.goldPale:"transparent"}}>
+          <span style={{fontSize:14,marginBottom:1}}>{item.icon}</span>
+          <span style={{fontSize:8,fontWeight:page===item.id?700:400}}>{(ar?item.ar:item.en).split(" ")[0]}</span>
+        </div>
+      ))}
+    </div>
+  );
+
+  // ── HEADER BAR (Language + Currency) ─────────────────────
+  const HeaderBar = () => (
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"9px 14px",marginBottom:16,gap:8}} className="np">
+      {/* Language */}
+      <div style={{display:"flex",overflow:"hidden",borderRadius:8,border:`1px solid ${C.border}`}}>
+        {["AR","EN"].map(l => (
+          <button key={l} onClick={() => setLang(l)} style={{padding:"5px 14px",border:"none",background:lang===l?C.gold:"transparent",color:lang===l?"white":C.textFaint,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{l}</button>
+        ))}
+      </div>
+      {/* Title */}
+      <div style={{fontSize:isMobile?13:16,fontWeight:800,color:C.text}}>{ar?"⬡ حاسبة تكلفة المطاعم":"⬡ Restaurant Cost Calculator"}</div>
+      {/* Currency */}
+      <div style={{position:"relative"}}>
+        <button onClick={() => setShowCurr(v => !v)} style={{display:"flex",alignItems:"center",gap:5,padding:"6px 12px",borderRadius:8,border:`2px solid ${C.gold}`,background:C.white,color:C.goldDark,fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"inherit",boxShadow:`0 2px 8px ${C.gold}35`}}>
+          <span style={{fontSize:18}}>{currency.flag}</span>
+          <span>{SY}</span>
+          <span style={{fontSize:8,color:C.textFaint}}>{showCurr?"▲":"▼"}</span>
+        </button>
+        {showCurr && (
+          <div style={{position:"absolute",top:"calc(100% + 8px)",[ar?"left":"right"]:0,background:C.white,border:`1.5px solid ${C.border}`,borderRadius:12,boxShadow:"0 8px 30px rgba(0,0,0,0.15)",zIndex:999,width:220,overflow:"hidden"}}>
+            <div style={{padding:"8px 14px",borderBottom:`1px solid ${C.borderSoft}`,fontSize:10,color:C.textFaint,fontWeight:700}}>{ar?"اختر العملة":"SELECT CURRENCY"}</div>
+            {CURRENCIES.map(c => (
+              <div key={c.code} onClick={() => {setCurrency(c); setShowCurr(false);}} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 14px",cursor:"pointer",background:currency.code===c.code?C.goldPale:"transparent",borderBottom:`1px solid ${C.borderSoft}`}}>
+                <span style={{fontSize:20}}>{c.flag}</span>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:12,fontWeight:700,color:currency.code===c.code?C.goldDark:C.text}}>{ar?c.name:c.nameEN}</div>
+                  <div style={{fontSize:9,color:C.textFaint}}>{c.sym} • {c.symEN}</div>
+                </div>
+                {currency.code===c.code && <span style={{color:C.gold}}>✓</span>}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  // ── SETUP ─────────────────────────────────────────────────
+  const renderSetup = () => (
+    <div style={{maxWidth:560}}>
+      <div style={{background:C.white,border:`1px solid ${C.border}`,borderRadius:14,padding:"18px 20px",boxShadow:C.shadow,marginBottom:16}}>
+        <div style={{fontSize:14,fontWeight:700,color:C.goldDark,marginBottom:16}}>⚙ {ar?"ربط التطبيق بدفترة":"Connect to Daftra"}</div>
+        <div style={{marginBottom:12}}>
+          <div style={{fontSize:11,fontWeight:700,color:C.textFaint,marginBottom:5}}>{ar?"النطاق الفرعي":"Subdomain"}</div>
+          <div style={{display:"flex"}}>
+            <input value={connection.subdomain} onChange={e => setConnection(c => ({...c,subdomain:e.target.value}))} placeholder={ar?"اسم-شركتك":"your-company"} style={{flex:1,padding:"9px 12px",border:`1.5px solid ${C.border}`,borderRadius:"8px 0 0 8px",fontSize:13,fontFamily:"inherit",background:C.white,color:C.text,outline:"none"}}/>
+            <div style={{padding:"9px 12px",background:C.surface2,border:`1.5px solid ${C.border}`,borderRadius:"0 8px 8px 0",fontSize:12,color:C.textFaint,whiteSpace:"nowrap"}}>.daftra.com</div>
+          </div>
+        </div>
+        <div style={{marginBottom:16}}>
+          <div style={{fontSize:11,fontWeight:700,color:C.textFaint,marginBottom:5}}>API Key</div>
+          <input type="password" value={connection.apiKey} onChange={e => setConnection(c => ({...c,apiKey:e.target.value}))} placeholder={ar?"أدخل مفتاح API":"Enter API Key"} style={{width:"100%",padding:"9px 12px",border:`1.5px solid ${C.border}`,borderRadius:8,fontSize:13,fontFamily:"inherit",background:C.white,color:C.text,outline:"none",boxSizing:"border-box"}}/>
+        </div>
+        <div style={{marginBottom:16}}>
+          <div style={{fontSize:11,fontWeight:700,color:C.textFaint,marginBottom:8}}>{ar?"العملة":"Currency"}</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8}}>
+            {CURRENCIES.map(c => (
+              <div key={c.code} onClick={() => setCurrency(c)} style={{padding:"8px 6px",borderRadius:8,border:`1.5px solid ${currency.code===c.code?C.gold:C.border}`,background:currency.code===c.code?C.goldPale:C.surface,cursor:"pointer",textAlign:"center"}}>
+                <div style={{fontSize:18,marginBottom:2}}>{c.flag}</div>
+                <div style={{fontSize:10,fontWeight:700,color:currency.code===c.code?C.goldDark:C.textDim}}>{ar?c.sym:c.symEN}</div>
+                <div style={{fontSize:8,color:C.textFaint}}>{ar?c.name.split(" ")[1]||c.name:c.nameEN.split(" ")[0]}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+        {/* الطريقة الأولى — OAuth تلقائي */}
+        <button onClick={connectOAuth} style={{width:"100%",padding:"12px",borderRadius:10,border:"none",background:`linear-gradient(135deg,${C.gold},${C.goldDark})`,color:"white",fontSize:14,fontWeight:800,cursor:"pointer",fontFamily:"inherit",marginBottom:10,boxShadow:`0 4px 14px ${C.gold}50`,display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+          <span style={{fontSize:20}}>🔗</span>
+          {ar?"تسجيل دخول بدفترة (موصى به)":"Login with Daftra (Recommended)"}
+        </button>
+        <div style={{textAlign:"center",fontSize:11,color:C.textFaint,marginBottom:10}}>
+          {ar?"— أو أدخل API Key يدوياً —":"— or enter API Key manually —"}
+        </div>
+        <div style={{display:"flex",gap:10}}>
+          <button onClick={connectDaftra} disabled={connection.status==="connecting"} style={{flex:1,padding:"9px",borderRadius:8,border:`1px solid ${C.border}`,background:C.white,color:C.goldDark,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+            {connection.status==="connecting"?(ar?"جاري...":"Connecting..."):(ar?"اتصال بـ API Key":"Connect with API Key")}
+          </button>
+          <button onClick={() => {setConnection(c=>({...c,status:"demo"})); setPage(PAGES.DASHBOARD);}} style={{flex:1,padding:"9px",borderRadius:8,border:`1px solid ${C.border}`,background:C.goldLight,color:C.goldDark,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+            {ar?"تجربة بدون اتصال":"Demo Mode"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  // ── DASHBOARD ─────────────────────────────────────────────
+  const renderDashboard = () => (
+    <>
+      <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(4,1fr)",gap:12,marginBottom:16}}>
+        {[
+          {label:ar?"متوسط Food Cost":"Avg Food Cost", value:`${avgFC.toFixed(1)}%`, color:getColor(avgFC), sub:getLabel(avgFC,ar)},
+          {label:ar?"عدد الوصفات":"Recipes",           value:enriched.length,        color:C.info,          sub:ar?"وصفة":"recipes"},
+          {label:ar?"المكوّنات":"Ingredients",          value:ingredients.length,     color:C.gold,          sub:ar?"مكوّن":"items"},
+          {label:ar?"أعلى هامش":"Best Margin",         value:enriched.length?`${Math.max(...enriched.map(r=>r.profit)).toFixed(0)}`:"—", color:C.positive, sub:SY},
+        ].map((k,i) => (
+          <div key={i} style={{background:C.white,border:`1px solid ${C.border}`,borderTop:`3px solid ${k.color}`,borderRadius:14,padding:"14px 16px",boxShadow:C.shadow}}>
+            <div style={{fontSize:10,color:C.textFaint,fontWeight:600,marginBottom:5}}>{k.label}</div>
+            <div style={{fontSize:isMobile?20:26,fontWeight:800,color:k.color}}>{k.value}</div>
+            <div style={{fontSize:10,color:C.textFaint,marginTop:2}}>{k.sub}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{background:C.white,border:`1px solid ${C.border}`,borderRadius:14,padding:"18px 20px",boxShadow:C.shadow,marginBottom:16}}>
+        <div style={{fontSize:14,fontWeight:700,color:C.goldDark,marginBottom:14}}>✦ {ar?"أداء الوصفات":"Recipe Performance"}</div>
+        {enriched.length === 0 ? (
+          <div style={{textAlign:"center",padding:"40px 20px"}}>
+            <div style={{fontSize:40,marginBottom:12}}>📦</div>
+            <div style={{fontSize:14,fontWeight:700,color:C.textDim,marginBottom:8}}>
+              {connection.status==="connected"
+                ? (ar?"لا توجد وصفات بعد — أضف مكوّنات ووصفات من القائمة الجانبية":"No recipes yet — add ingredients & recipes from sidebar")
+                : (ar?"اتصل بدفترة لجلب منتجاتك الحقيقية":"Connect to Daftra to load your real products")}
+            </div>
+            {connection.status==="connected" && ingredients.length === 0 && (
+              <div style={{fontSize:12,color:C.textFaint}}>
+                {ar?"💡 تلميح: أضف منتجاتك في دفترة أولاً ثم اضغط زر الاتصال مجدداً لجلبها":"💡 Tip: Add products in Daftra first, then reconnect to load them"}
+              </div>
+            )}
+          </div>
+        ) : (
+        <div style={{overflowX:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",minWidth:500}}>
+            <thead><tr>
+              {[ar?"الوصفة":"Recipe",ar?"تكلفة الطبق":"Cost",ar?"سعر البيع":"Price",ar?"هامش الربح":"Profit",ar?"نسبة التكلفة":"Food Cost%",ar?"الحالة":"Status"].map(h => (
+                <th key={h} style={{textAlign:ar?"right":"left",padding:"8px 12px",fontSize:11,color:C.textFaint,borderBottom:`2px solid ${C.border}`,fontWeight:700}}>{h}</th>
+              ))}
+            </tr></thead>
+            <tbody>
+              {enriched.map(r => (
+                <tr key={r.id}>
+                  <td style={{padding:"10px 12px",fontSize:13,fontWeight:700,color:C.text,borderBottom:`1px solid ${C.borderSoft}`}}>{ar?r.name:(r.nameEN||r.name)}</td>
+                  <td style={{padding:"10px 12px",fontSize:13,color:C.textDim,borderBottom:`1px solid ${C.borderSoft}`}}>{r.cost.toFixed(2)} {SY}</td>
+                  <td style={{padding:"10px 12px",fontSize:13,color:C.textDim,borderBottom:`1px solid ${C.borderSoft}`}}>{r.sellingPrice} {SY}</td>
+                  <td style={{padding:"10px 12px",fontSize:13,fontWeight:700,color:C.positive,borderBottom:`1px solid ${C.borderSoft}`}}>{r.profit.toFixed(2)} {SY}</td>
+                  <td style={{padding:"10px 12px",borderBottom:`1px solid ${C.borderSoft}`}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <div style={{flex:1,height:6,background:C.surface2,borderRadius:3,overflow:"hidden"}}>
+                        <div style={{height:"100%",width:`${Math.min(r.pct,50)*2}%`,background:getColor(r.pct),borderRadius:3}}/>
+                      </div>
+                      <span style={{color:getColor(r.pct),fontWeight:700,fontSize:12,minWidth:36}}>{r.pct.toFixed(1)}%</span>
+                    </div>
+                  </td>
+                  <td style={{padding:"10px 12px",borderBottom:`1px solid ${C.borderSoft}`}}>
+                    <span style={{padding:"2px 9px",borderRadius:20,background:getColor(r.pct)+"18",color:getColor(r.pct),border:`1px solid ${getColor(r.pct)}30`,fontSize:11,fontWeight:700}}>{getLabel(r.pct,ar)}</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        )}
+      </div>
+    </>
+  );
+
+  // ── INGREDIENTS ───────────────────────────────────────────
+  const renderIngredients = () => (
+    <>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+        <span style={{fontSize:13,color:C.textFaint}}>{ingredients.length} {ar?"مكوّن":"ingredients"}</span>
+        <button onClick={() => setShowIngForm(true)} style={{padding:"7px 14px",borderRadius:8,border:"none",background:`linear-gradient(135deg,${C.gold},${C.goldDark})`,color:"white",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ {ar?"إضافة مكوّن":"Add Ingredient"}</button>
+      </div>
+      <div style={{background:C.white,border:`1px solid ${C.border}`,borderRadius:14,padding:"18px 20px",boxShadow:C.shadow}}>
+        <div style={{overflowX:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",minWidth:420}}>
+            <thead><tr>
+              {[ar?"المكوّن":"Ingredient",ar?"التصنيف":"Category",ar?"الوحدة":"Unit",ar?"السعر":"Price",""].map(h => (
+                <th key={h} style={{textAlign:ar?"right":"left",padding:"8px 12px",fontSize:11,color:C.textFaint,borderBottom:`2px solid ${C.border}`,fontWeight:700}}>{h}</th>
+              ))}
+            </tr></thead>
+            <tbody>
+              {ingredients.map(ing => (
+                <tr key={ing.id}>
+                  <td style={{padding:"10px 12px",fontSize:13,fontWeight:700,color:C.text,borderBottom:`1px solid ${C.borderSoft}`}}>{ar?ing.name:(ing.nameEN||ing.name)}</td>
+                  <td style={{padding:"10px 12px",borderBottom:`1px solid ${C.borderSoft}`}}>
+                    <span style={{padding:"2px 9px",borderRadius:20,background:C.goldPale,color:C.goldDark,border:`1px solid ${C.border}`,fontSize:11,fontWeight:700}}>{ar?ing.category:(ing.catEN||ing.category)}</span>
+                  </td>
+                  <td style={{padding:"10px 12px",fontSize:13,color:C.textDim,borderBottom:`1px solid ${C.borderSoft}`}}>{ar?ing.unit:(ing.unitEN||ing.unit)}</td>
+                  <td style={{padding:"10px 12px",fontSize:13,fontWeight:700,color:C.goldDark,borderBottom:`1px solid ${C.borderSoft}`}}>{ing.price} {SY}</td>
+                  <td style={{padding:"10px 12px",borderBottom:`1px solid ${C.borderSoft}`}}>
+                    <button onClick={() => {setIngredients(i => i.filter(x => x.id !== ing.id)); toast(ar?"تم الحذف":"Deleted");}} style={{padding:"4px 10px",borderRadius:6,border:`1px solid ${C.negative}30`,background:"#FFF0EE",color:C.negative,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{ar?"حذف":"Delete"}</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {showIngForm && (
+        <div style={{position:"fixed",inset:0,background:"rgba(30,20,8,0.4)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={() => setShowIngForm(false)}>
+          <div onClick={e => e.stopPropagation()} style={{background:C.white,borderRadius:16,padding:28,width:"100%",maxWidth:500,boxShadow:"0 20px 60px rgba(0,0,0,0.2)"}}>
+            <div style={{fontSize:17,fontWeight:800,color:C.goldDark,marginBottom:20}}>{ar?"إضافة مكوّن جديد":"Add New Ingredient"}</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
+              {[
+                {label:ar?"الاسم بالعربي":"Arabic Name",   val:newIng.name,     key:"name",     ph:ar?"دجاج طازج":"Arabic name"},
+                {label:ar?"الاسم بالإنجليزي":"English Name",val:newIng.nameEN,  key:"nameEN",   ph:"Fresh Chicken"},
+                {label:ar?"التصنيف":"Category",             val:newIng.category, key:"category", ph:"خضروات",select:["بروتين","خضروات","حبوب","ألبان","زيوت","توابل","أخرى"]},
+                {label:ar?"Category (EN)":"Category (EN)", val:newIng.catEN,    key:"catEN",    ph:"Vegetables",select:["Protein","Vegetables","Grains","Dairy","Oils","Spices","Other"]},
+                {label:ar?"وحدة القياس":"Unit",             val:newIng.unit,     key:"unit",     ph:"كجم",select:["كجم","جم","لتر","مل","حبة","علبة"]},
+                {label:ar?"السعر":"Price ("+SY+")",         val:newIng.price,    key:"price",    ph:"0.00",type:"number"},
+              ].map(f => (
+                <div key={f.key}>
+                  <div style={{fontSize:11,fontWeight:700,color:C.textFaint,marginBottom:4}}>{f.label}</div>
+                  {f.select ? (
+                    <select value={f.val} onChange={e => setNewIng({...newIng,[f.key]:e.target.value})} style={{width:"100%",padding:"8px 10px",border:`1.5px solid ${C.border}`,borderRadius:7,fontSize:12,fontFamily:"inherit",background:C.white,color:C.text}}>
+                      {f.select.map(o => <option key={o}>{o}</option>)}
+                    </select>
+                  ) : (
+                    <input type={f.type||"text"} value={f.val} onChange={e => setNewIng({...newIng,[f.key]:e.target.value})} placeholder={f.ph} style={{width:"100%",padding:"8px 10px",border:`1.5px solid ${C.border}`,borderRadius:7,fontSize:12,fontFamily:"inherit",background:C.white,color:C.text,boxSizing:"border-box"}}/>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+              <button onClick={() => setShowIngForm(false)} style={{padding:"8px 16px",borderRadius:8,border:`1px solid ${C.border}`,background:"transparent",color:C.gold,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{ar?"إلغاء":"Cancel"}</button>
+              <button onClick={() => {
+                if(!newIng.name||!newIng.price) return toast(ar?"أدخل الاسم والسعر":"Enter name and price","error");
+                setIngredients([...ingredients,{...newIng,id:Date.now(),price:parseFloat(newIng.price)}]);
+                setNewIng({name:"",nameEN:"",unit:"كجم",unitEN:"kg",price:"",category:"خضروات",catEN:"Vegetables"});
+                setShowIngForm(false); toast(ar?"تم إضافة المكوّن":"Ingredient added");
+              }} style={{padding:"8px 16px",borderRadius:8,border:"none",background:`linear-gradient(135deg,${C.gold},${C.goldDark})`,color:"white",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{ar?"حفظ":"Save"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+
+  // ── RECIPES ───────────────────────────────────────────────
+  const renderRecipes = () => (
+    <>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+        <span style={{fontSize:13,color:C.textFaint}}>{recipes.length} {ar?"وصفة":"recipes"}</span>
+        <button onClick={() => {setEditingRecipe(null); setNewRecipe({name:"",nameEN:"",category:"أطباق رئيسية",catEN:"Main Dishes",sellingPrice:"",portions:1,ingredients:[]}); setShowRecipeForm(true);}} style={{padding:"7px 14px",borderRadius:8,border:"none",background:`linear-gradient(135deg,${C.gold},${C.goldDark})`,color:"white",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ {ar?"إضافة وصفة":"Add Recipe"}</button>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":isTablet?"1fr 1fr":"repeat(3,1fr)",gap:14}}>
+        {enriched.map(r => (
+          <div key={r.id} style={{background:C.white,border:`1px solid ${C.border}`,borderTop:`3px solid ${getColor(r.pct)}`,borderRadius:14,padding:"16px 18px",boxShadow:C.shadow}}>
+            <div style={{fontSize:14,fontWeight:800,color:C.text,marginBottom:4}}>{ar?r.name:(r.nameEN||r.name)}</div>
+            <div style={{marginBottom:12}}>
+              <span style={{padding:"2px 9px",borderRadius:20,background:C.goldPale,color:C.goldDark,border:`1px solid ${C.border}`,fontSize:11,fontWeight:700}}>{ar?r.category:(r.catEN||r.category)}</span>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
+              {[
+                {l:ar?"تكلفة الطبق":"Cost",  v:`${r.cost.toFixed(2)} ${SY}`, c:C.negative},
+                {l:ar?"سعر البيع":"Price",    v:`${r.sellingPrice} ${SY}`,     c:C.info},
+                {l:ar?"هامش الربح":"Profit", v:`${r.profit.toFixed(2)} ${SY}`,c:C.positive},
+                {l:ar?"نسبة التكلفة":"FC%",  v:`${r.pct.toFixed(1)}%`,        c:getColor(r.pct)},
+              ].map((item,i) => (
+                <div key={i} style={{background:C.surface,borderRadius:8,padding:"8px 10px"}}>
+                  <div style={{fontSize:9,color:C.textFaint,marginBottom:2}}>{item.l}</div>
+                  <div style={{fontSize:13,fontWeight:700,color:item.c}}>{item.v}</div>
+                </div>
+              ))}
+            </div>
+            <button onClick={() => {setNewRecipe({...r,sellingPrice:r.sellingPrice.toString()}); setEditingRecipe(r.id); setShowRecipeForm(true);}} style={{width:"100%",padding:"7px",borderRadius:8,border:`1px solid ${C.gold}`,background:"transparent",color:C.gold,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{ar?"تعديل":"Edit"}</button>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+
+  // ── REPORTS ───────────────────────────────────────────────
+  const renderReports = () => (
+    <>
+      {/* Export Buttons */}
+      <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap"}} className="np">
+        <button onClick={doPrint} style={{display:"flex",alignItems:"center",gap:6,padding:"8px 16px",borderRadius:8,border:`1px solid ${C.border}`,background:C.surface,color:C.textDim,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>🖨 {ar?"طباعة":"Print"}</button>
+        <button onClick={doExcel} style={{display:"flex",alignItems:"center",gap:6,padding:"8px 16px",borderRadius:8,border:`1px solid ${C.positive}50`,background:"#F0FFF0",color:C.positive,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📊 {ar?"تصدير Excel":"Export Excel"}</button>
+        <button onClick={doPrint} style={{display:"flex",alignItems:"center",gap:6,padding:"8px 16px",borderRadius:8,border:`1px solid ${C.gold}`,background:C.goldLight,color:C.goldDark,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📄 {ar?"تصدير PDF":"Export PDF"}</button>
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:14,marginBottom:14}}>
+        <div style={{background:C.white,border:`1px solid ${C.border}`,borderRadius:14,padding:"18px 20px",boxShadow:C.shadow}}>
+          <div style={{fontSize:13,fontWeight:700,color:C.goldDark,marginBottom:14}}>⚠ {ar?"أعلى نسب التكلفة":"Highest Food Cost"}</div>
+          {[...enriched].sort((a,b) => b.pct-a.pct).map(r => (
+            <div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:`1px solid ${C.borderSoft}`}}>
+              <div>
+                <div style={{fontSize:13,fontWeight:700,color:C.text}}>{ar?r.name:(r.nameEN||r.name)}</div>
+                <div style={{fontSize:10,color:C.textFaint}}>{ar?"تكلفة:":"Cost:"} {r.cost.toFixed(2)} {SY}</div>
+              </div>
+              <span style={{padding:"2px 9px",borderRadius:20,background:getColor(r.pct)+"18",color:getColor(r.pct),border:`1px solid ${getColor(r.pct)}30`,fontSize:12,fontWeight:700}}>{r.pct.toFixed(1)}%</span>
+            </div>
+          ))}
+        </div>
+        <div style={{background:C.white,border:`1px solid ${C.border}`,borderRadius:14,padding:"18px 20px",boxShadow:C.shadow}}>
+          <div style={{fontSize:13,fontWeight:700,color:C.goldDark,marginBottom:14}}>✦ {ar?"أعلى هوامش الربح":"Best Profit Margins"}</div>
+          {[...enriched].sort((a,b) => b.profit-a.profit).map(r => (
+            <div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:`1px solid ${C.borderSoft}`}}>
+              <div>
+                <div style={{fontSize:13,fontWeight:700,color:C.text}}>{ar?r.name:(r.nameEN||r.name)}</div>
+                <div style={{fontSize:10,color:C.textFaint}}>{ar?"سعر البيع:":"Price:"} {r.sellingPrice} {SY}</div>
+              </div>
+              <span style={{color:C.positive,fontWeight:800,fontSize:14}}>+{r.profit.toFixed(2)} {SY}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Full Report Table */}
+      <div style={{background:C.white,border:`1px solid ${C.border}`,borderRadius:14,padding:"18px 20px",boxShadow:C.shadow}}>
+        <div style={{fontSize:13,fontWeight:700,color:C.goldDark,marginBottom:14}}>◎ {ar?"تقرير شامل":"Full Report"}</div>
+        <div style={{overflowX:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",minWidth:520}}>
+            <thead><tr>
+              {[ar?"الوصفة":"Recipe",ar?"تكلفة المكوّنات":"Ingredient Cost",ar?"سعر البيع":"Selling Price",ar?"هامش الربح":"Profit Margin",ar?"نسبة التكلفة":"Food Cost%",ar?"التوصية":"Recommendation"].map(h => (
+                <th key={h} style={{textAlign:ar?"right":"left",padding:"8px 12px",fontSize:11,color:C.textFaint,borderBottom:`2px solid ${C.border}`,fontWeight:700}}>{h}</th>
+              ))}
+            </tr></thead>
+            <tbody>
+              {enriched.map((r,i) => (
+                <tr key={r.id} style={{background:i%2===0?C.surface:C.white}}>
+                  <td style={{padding:"9px 12px",fontSize:12,fontWeight:700,color:C.text,borderBottom:`1px solid ${C.borderSoft}`}}>{ar?r.name:(r.nameEN||r.name)}</td>
+                  <td style={{padding:"9px 12px",fontSize:12,color:C.textDim,borderBottom:`1px solid ${C.borderSoft}`}}>{r.cost.toFixed(2)} {SY}</td>
+                  <td style={{padding:"9px 12px",fontSize:12,color:C.textDim,borderBottom:`1px solid ${C.borderSoft}`}}>{r.sellingPrice} {SY}</td>
+                  <td style={{padding:"9px 12px",fontSize:12,fontWeight:700,color:C.positive,borderBottom:`1px solid ${C.borderSoft}`}}>{r.profit.toFixed(2)} {SY}</td>
+                  <td style={{padding:"9px 12px",fontSize:12,fontWeight:700,color:getColor(r.pct),borderBottom:`1px solid ${C.borderSoft}`}}>{r.pct.toFixed(1)}%</td>
+                  <td style={{padding:"9px 12px",fontSize:11,color:C.textDim,borderBottom:`1px solid ${C.borderSoft}`}}>
+                    {r.pct<=28?(ar?"✓ لا تعديل":"✓ No change"):r.pct<=35?(ar?"⚠ راجع الكميات":"⚠ Review quantities"):(ar?"✗ ارفع السعر":"✗ Raise price")}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </>
+  );
+
+  const pageTitle = {
+    [PAGES.SETUP]:       ar?"إعدادات دفترة":"Daftra Settings",
+    [PAGES.DASHBOARD]:   ar?"لوحة التحكم":"Dashboard",
+    [PAGES.INGREDIENTS]: ar?"المكوّنات":"Ingredients",
+    [PAGES.RECIPES]:     ar?"الوصفات":"Recipes",
+    [PAGES.REPORTS]:     ar?"التقارير":"Reports",
+  }[page];
+
+  return (
+    <>
+      <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet"/>
+      <style>{`* { box-sizing: border-box; } @media print { .np { display:none!important; } }`}</style>
+      <div style={{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:"'Cairo',sans-serif",direction:dir}}>
+        {alert && (
+          <div style={{position:"fixed",top:16,left:"50%",transform:"translateX(-50%)",background:C.white,border:`1.5px solid ${alert.type==="error"?C.negative:alert.type==="warn"?C.warning:C.positive}`,color:alert.type==="error"?C.negative:alert.type==="warn"?C.warning:C.positive,padding:"10px 22px",borderRadius:10,fontSize:13,fontWeight:700,zIndex:999,boxShadow:C.shadow,whiteSpace:"nowrap"}}>
+            {alert.msg}
+          </div>
+        )}
+        {!isMobile && <Sidebar/>}
+        {isMobile && <BottomNav/>}
+        <main style={{[ar?"marginRight":"marginLeft"]:sidebarW,padding:isMobile?"12px 12px 80px":"20px 26px",minHeight:"100vh"}}>
+          <HeaderBar/>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,paddingBottom:12,borderBottom:`1px solid ${C.borderSoft}`}} className="np">
+            <h1 style={{fontSize:isMobile?16:20,fontWeight:800,color:C.text,margin:0}}>{pageTitle}</h1>
+            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+            {connection.status==="connected" && <span style={{padding:"3px 10px",borderRadius:20,background:C.positive+"18",color:C.positive,border:`1px solid ${C.positive}30`,fontSize:11,fontWeight:700}}>🟢 {ar?"متصل بدفترة":"Connected to Daftra"}</span>}
+            {connection.status==="demo" && <span style={{padding:"3px 10px",borderRadius:20,background:C.warning+"18",color:C.warning,border:`1px solid ${C.warning}30`,fontSize:11,fontWeight:700}}>🟡 {ar?"وضع تجربة":"Demo Mode"}</span>}
+            {connection.status==="connected" && <button onClick={disconnect} style={{padding:"3px 10px",borderRadius:20,background:"#FFF0EE",color:C.negative,border:`1px solid ${C.negative}30`,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{ar?"قطع الاتصال":"Disconnect"}</button>}
+          </div>
+          </div>
+          {page===PAGES.SETUP        && renderSetup()}
+          {page===PAGES.DASHBOARD    && renderDashboard()}
+          {page===PAGES.INGREDIENTS  && renderIngredients()}
+          {page===PAGES.RECIPES      && renderRecipes()}
+          {page===PAGES.REPORTS      && renderReports()}
+        </main>
+      </div>
+    </>
+  );
 }
-const {useState,useEffect,useMemo,useCallback,useRef}=React;
-const G={bg:"#FFFDF7",sur:"#FEF8ED",sur2:"#FDF3D8",bdr:"#E8D090",bdrS:"#F2E4B0",gold:"#C8A84B",goldD:"#9B7820",goldP:"#C8A84B18",goldL:"#FFF8E0",txt:"#1E1408",txtD:"#5C4020",txtF:"#9B7840",pos:"#1A6B1A",neg:"#B03020",wrn:"#C07010",inf:"#1A5C8A",pur:"#5B21B6",shd:"0 2px 12px rgba(200,168,75,0.12)"};
-const CURR=[{code:"EGP",s:"ج.م",sE:"EGP",n:"الجنيه المصري",nE:"Egyptian Pound",f:"🇪🇬",rate:1},{code:"SAR",s:"ر.س",sE:"SAR",n:"الريال السعودي",nE:"Saudi Riyal",f:"🇸🇦",rate:0.079},{code:"AED",s:"د.إ",sE:"AED",n:"الدرهم الإماراتي",nE:"UAE Dirham",f:"🇦🇪",rate:0.082},{code:"KWD",s:"د.ك",sE:"KWD",n:"الدينار الكويتي",nE:"Kuwaiti Dinar",f:"🇰🇼",rate:0.0069},{code:"BHD",s:"د.ب",sE:"BHD",n:"الدينار البحريني",nE:"Bahraini Dinar",f:"🇧🇭",rate:0.0085},{code:"QAR",s:"ر.ق",sE:"QAR",n:"الريال القطري",nE:"Qatari Riyal",f:"🇶🇦",rate:0.082},{code:"JOD",s:"د.أ",sE:"JOD",n:"الدينار الأردني",nE:"Jordanian Dinar",f:"🇯🇴",rate:0.0159}];
-const NAV=[{id:"home",icon:"◈",ar:"الرئيسية",en:"Overview"},{id:"pl",icon:"▲",ar:"قائمة الدخل",en:"P&L"},{id:"revenue",icon:"📈",ar:"تحليل الإيرادات",en:"Revenue"},{id:"expenses",icon:"📊",ar:"تحليل المصروفات",en:"Expenses"},{id:"liquidity",icon:"💧",ar:"السيولة",en:"Liquidity"},{id:"banks",icon:"🏦",ar:"البنوك والخزينة",en:"Banks"},{id:"alerts",icon:"🔔",ar:"التنبيهات",en:"Alerts"},{id:"board",icon:"📋",ar:"تقرير المجلس",en:"Board"},{id:"reports",icon:"✦",ar:"التقارير",en:"Reports"},{id:"settings",icon:"⚙️",ar:"الإعدادات",en:"Settings"}];
-const MAR=["يناير","فبراير","مارس","أبريل","مايو","يونيو","يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"];
-const MEN=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-const DEMO={invoices:[{id:1,no:"INV-001",client:"شركة الأهرام",clientEn:"Al-Ahram Co.",amount:185000,paid:185000,date:"2025-01-15",status:"paid"},{id:2,no:"INV-002",client:"مجموعة النيل",clientEn:"Nile Group",amount:142000,paid:142000,date:"2025-02-03",status:"paid"},{id:3,no:"INV-003",client:"الفنادق المتحدة",clientEn:"United Hotels",amount:220000,paid:220000,date:"2025-03-10",status:"paid"},{id:4,no:"INV-004",client:"مؤسسة سيناء",clientEn:"Sinai Foundation",amount:168000,paid:168000,date:"2025-04-08",status:"paid"},{id:5,no:"INV-005",client:"شركة دلتا",clientEn:"Delta Co.",amount:195000,paid:195000,date:"2025-05-15",status:"paid"},{id:6,no:"INV-006",client:"شركة الأهرام",clientEn:"Al-Ahram Co.",amount:210000,paid:210000,date:"2025-06-01",status:"paid"},{id:7,no:"INV-007",client:"مجموعة النيل",clientEn:"Nile Group",amount:155000,paid:155000,date:"2025-07-05",status:"paid"},{id:8,no:"INV-008",client:"الفنادق المتحدة",clientEn:"United Hotels",amount:188000,paid:188000,date:"2025-08-20",status:"paid"},{id:9,no:"INV-009",client:"مؤسسة سيناء",clientEn:"Sinai Foundation",amount:178000,paid:178000,date:"2025-09-10",status:"paid"},{id:10,no:"INV-010",client:"شركة دلتا",clientEn:"Delta Co.",amount:215000,paid:215000,date:"2025-10-01",status:"paid"},{id:11,no:"INV-011",client:"شركة الأهرام",clientEn:"Al-Ahram Co.",amount:248000,paid:248000,date:"2025-10-18",status:"paid"},{id:12,no:"INV-012",client:"مجموعة النيل",clientEn:"Nile Group",amount:172000,paid:172000,date:"2025-11-03",status:"paid"},{id:13,no:"INV-013",client:"الفنادق المتحدة",clientEn:"United Hotels",amount:205000,paid:102500,date:"2025-11-20",status:"partial"},{id:14,no:"INV-014",client:"مؤسسة سيناء",clientEn:"Sinai Foundation",amount:192000,paid:0,date:"2025-12-05",status:"unpaid"},{id:15,no:"INV-015",client:"شركة الأهرام",clientEn:"Al-Ahram Co.",amount:265000,paid:0,date:"2025-12-12",status:"unpaid"},{id:16,no:"INV-016",client:"شركة دلتا",clientEn:"Delta Co.",amount:138000,paid:0,date:"2025-12-18",status:"unpaid"}],incomes:[{id:1,category:"فوائد بنكية",categoryEn:"Bank Interest",amount:8500,date:"2025-10-31"},{id:2,category:"إيراد استثماري",categoryEn:"Investment Income",amount:25000,date:"2025-11-15"},{id:3,category:"إيراد متنوع",categoryEn:"Misc Income",amount:12000,date:"2025-12-01"},{id:4,category:"فوائد بنكية",categoryEn:"Bank Interest",amount:9200,date:"2025-12-31"}],purchaseInvoices:[{id:1,no:"PO-001",supplier:"المورد الرئيسي",supplierEn:"Main Supplier",amount:380000,paid:380000,date:"2025-01-10",status:"paid"},{id:2,no:"PO-002",supplier:"مورد المواد",supplierEn:"Materials Co.",amount:195000,paid:195000,date:"2025-03-15",status:"paid"},{id:3,no:"PO-003",supplier:"خدمات تقنية",supplierEn:"Tech Services",amount:85000,paid:85000,date:"2025-05-20",status:"paid"},{id:4,no:"PO-004",supplier:"المورد الرئيسي",supplierEn:"Main Supplier",amount:420000,paid:420000,date:"2025-07-05",status:"paid"},{id:5,no:"PO-005",supplier:"مورد المواد",supplierEn:"Materials Co.",amount:210000,paid:210000,date:"2025-08-12",status:"paid"},{id:6,no:"PO-006",supplier:"المورد الرئيسي",supplierEn:"Main Supplier",amount:445000,paid:240000,date:"2025-10-15",status:"partial"},{id:7,no:"PO-007",supplier:"مورد المواد",supplierEn:"Materials Co.",amount:258000,paid:0,date:"2025-11-20",status:"unpaid"},{id:8,no:"PO-008",supplier:"خدمات لوجستية",supplierEn:"Logistics Co.",amount:145000,paid:0,date:"2025-12-08",status:"unpaid"}],expenses:[{id:1,category:"رواتب وأجور",categoryEn:"Payroll",amount:145000,date:"2025-12-01",type:"operating"},{id:2,category:"إيجار",categoryEn:"Rent",amount:25000,date:"2025-12-01",type:"general"},{id:3,category:"مرافق",categoryEn:"Utilities",amount:8500,date:"2025-12-05",type:"general"},{id:4,category:"تسويق وإعلان",categoryEn:"Marketing",amount:32000,date:"2025-12-08",type:"operating"},{id:5,category:"صيانة",categoryEn:"Maintenance",amount:15000,date:"2025-12-10",type:"operating"},{id:6,category:"نقل وتوصيل",categoryEn:"Transport",amount:18000,date:"2025-12-12",type:"operating"},{id:7,category:"مصاريف إدارية",categoryEn:"Admin",amount:22000,date:"2025-12-15",type:"general"},{id:8,category:"اشتراكات",categoryEn:"Subscriptions",amount:9500,date:"2025-12-18",type:"general"},{id:9,category:"رواتب وأجور",categoryEn:"Payroll",amount:145000,date:"2025-11-01",type:"operating"},{id:10,category:"إيجار",categoryEn:"Rent",amount:25000,date:"2025-11-01",type:"general"},{id:11,category:"تسويق وإعلان",categoryEn:"Marketing",amount:28000,date:"2025-11-10",type:"operating"},{id:12,category:"مرافق",categoryEn:"Utilities",amount:9200,date:"2025-11-05",type:"general"}],treasuries:[{id:1,name:"الخزينة الرئيسية",nameEn:"Main Treasury",balance:485000,currency:"EGP",type:"cash"},{id:2,name:"حساب البنك الأهلي",nameEn:"NBE Account",balance:1250000,currency:"EGP",type:"bank"},{id:3,name:"حساب CIB",nameEn:"CIB Account",balance:820000,currency:"EGP",type:"bank"},{id:4,name:"حساب QNB",nameEn:"QNB Account",balance:340000,currency:"EGP",type:"bank"},{id:5,name:"خزينة الدولار",nameEn:"USD Treasury",balance:18500,currency:"USD",type:"cash"}],clients:[{id:1,name:"شركة الأهرام",nameEn:"Al-Ahram Co.",balance:265000,overdue:0,days:0},{id:2,name:"مجموعة النيل",nameEn:"Nile Group",balance:0,overdue:0,days:0},{id:3,name:"الفنادق المتحدة",nameEn:"United Hotels",balance:102500,overdue:0,days:0},{id:4,name:"مؤسسة سيناء",nameEn:"Sinai Foundation",balance:192000,overdue:192000,days:25},{id:5,name:"شركة دلتا",nameEn:"Delta Co.",balance:138000,overdue:138000,days:12}],suppliers:[{id:1,name:"المورد الرئيسي",nameEn:"Main Supplier",balance:205000,overdue:205000,days:15},{id:2,name:"مورد المواد",nameEn:"Materials Co.",balance:258000,overdue:0,days:0},{id:3,name:"خدمات لوجستية",nameEn:"Logistics Co.",balance:145000,overdue:145000,days:7},{id:4,name:"خدمات تقنية",nameEn:"Tech Services",balance:0,overdue:0,days:0}]};
-const EMPTY={invoices:[],incomes:[],purchaseInvoices:[],expenses:[],treasuries:[],clients:[],suppliers:[]};
-function parseResp(raw,key){if(!raw)return[];let arr=[];if(Array.isArray(raw.data))arr=raw.data;else if(Array.isArray(raw[key]))arr=raw[key];else if(Array.isArray(raw))arr=raw;return arr.map(item=>{if(!item||typeof item!=="object")return item;const keys=Object.keys(item);if(keys.length===1&&item[keys[0]]&&typeof item[keys[0]]==="object"&&!Array.isArray(item[keys[0]]))return item[keys[0]];return item;});}
-function stOf(total,paid,raw){const s=(raw||"").toLowerCase();if(s.includes("paid")&&!s.includes("unpaid")&&!s.includes("partial"))return "paid";if(s.includes("partial"))return "partial";if(s==="1")return "paid";const t=parseFloat(total)||0,p=parseFloat(paid)||0;if(t<=0||p>=t)return "paid";if(p>0&&p<t)return "partial";return "unpaid";}
-const mapInv=i=>{const a=parseFloat(i.summary_total||i.total||i.amount||0),p=parseFloat(i.summary_paid||i.paid_amount||i.paid||0);return{id:i.id,no:i.no||i.number||String(i.id),client:i.client_business_name||i.name||"",clientEn:i.client_business_name||i.name||"",amount:a,paid:p,date:i.date||i.issue_date||"",status:stOf(a,p,i.payment_status||"")};};
-const mapInc=e=>({id:e.id,category:e.category_name||e.category||e.title||"إيراد آخر",categoryEn:e.category_name||e.category||"Other Income",amount:parseFloat(e.amount||e.total||0),date:e.date||e.created||""});
-const mapPur=p=>{const a=parseFloat(p.summary_total||p.total||p.amount||0),pd=parseFloat(p.summary_paid||p.paid_amount||p.paid||0);return{id:p.id,no:p.no||p.number||String(p.id),supplier:p.supplier_business_name||p.name||"",supplierEn:p.supplier_business_name||p.name||"",amount:a,paid:pd,date:p.date||p.issue_date||"",status:stOf(a,pd,p.payment_status||"")};};
-const mapExp=e=>({id:e.id,category:e.expense_category_name||e.category_name||e.category||e.title||"متنوع",categoryEn:e.expense_category_name||e.category_name||e.category||"Misc",amount:parseFloat(e.amount||e.total||0),date:e.date||e.expense_date||e.created||"",type:e.type||"operating"});
-const mapCli=c=>({id:c.id,name:c.business_name||c.name||"",nameEn:c.business_name||c.name||"",balance:parseFloat(c.balance||c.outstanding_balance||0),overdue:parseFloat(c.overdue_balance||c.overdue||0),days:parseInt(c.overdue_days||0)});
-const mapSup=s=>({id:s.id,name:s.business_name||s.name||"",nameEn:s.business_name||s.name||"",balance:parseFloat(s.balance||s.outstanding_balance||0),overdue:parseFloat(s.overdue_balance||s.overdue||0),days:parseInt(s.overdue_days||0)});
-const mapTre=t=>({id:t.id,name:t.name||"",nameEn:t.name||"",balance:parseFloat(t.balance||t.current_balance||0),currency:t.currency||t.currency_code||"EGP",type:(t.name||"").match(/بنك|bank|account|حساب/i)?"bank":"cash"});
-function byPeriod(items,period,f="date"){const now=new Date(),y=now.getFullYear(),m=now.getMonth();return items.filter(it=>{const d=new Date(it[f]);if(isNaN(d))return true;if(period==="MTD")return d.getFullYear()===y&&d.getMonth()===m;if(period==="QTD")return d.getFullYear()===y&&Math.floor(d.getMonth()/3)===Math.floor(m/3);return d.getFullYear()===y;});}
-const mOf=ds=>{const d=new Date(ds);return isNaN(d)?-1:d.getMonth();};
-const agBkt=days=>{if(days<=0)return 0;if(days<=30)return 1;if(days<=60)return 2;if(days<=90)return 3;return 4;};
-const fmt=(n,rate=1)=>isNaN(n)?"0":new Intl.NumberFormat("ar-EG").format(Math.round(n*rate));
-const fmtD=(n,d=1)=>isNaN(n)?"0":new Intl.NumberFormat("ar-EG",{minimumFractionDigits:d,maximumFractionDigits:d}).format(n);
-const el=React.createElement;
-const Logo=({size=30})=>el("svg",{width:size,height:size,viewBox:"0 0 48 48",style:{flexShrink:0}},el("rect",{width:48,height:48,rx:11,fill:G.gold}),el("path",{d:"M 33.19 14.81 A 13 13 0 1 0 33.19 33.19",fill:"none",stroke:"white",strokeWidth:"3.5",strokeLinecap:"round"}),el("circle",{cx:"33.19",cy:"14.81",r:3,fill:"white"}),el("circle",{cx:"33.19",cy:"33.19",r:3,fill:"white"}),el("line",{x1:36,y1:"14.81",x2:43,y2:"14.81",stroke:"white",strokeWidth:"1.5",strokeDasharray:"2 2",opacity:.7}),el("line",{x1:36,y1:"33.19",x2:43,y2:"33.19",stroke:"white",strokeWidth:"1.5",strokeDasharray:"2 2",opacity:.7}),el("circle",{cx:"44.5",cy:24,r:2,fill:"white",opacity:.85}));
-const Spark=({data,color,h=28,w=100})=>{if(!data||data.length<2)return null;const mx=Math.max(...data),mn=Math.min(...data),rng=mx-mn||1;const pts=data.map((v,i)=>`${(i/(data.length-1))*w},${h-((v-mn)/rng)*h}`).join(" ");return el("svg",{width:w,height:h,style:{overflow:"visible"}},el("polyline",{points:`0,${h} ${pts} ${w},${h}`,fill:color+"20"}),el("polyline",{points:pts,fill:"none",stroke:color,strokeWidth:"1.8"}),el("circle",{cx:w,cy:h-((data[data.length-1]-mn)/rng)*h,r:"2.5",fill:color}));};
-const BarChart=({data,labels,color,h=80})=>{const mx=Math.max(...data,1);const bw=100/data.length;const maxV=Math.max(...data);return el("svg",{viewBox:`0 0 100 ${h}`,style:{width:"100%",height:h}},data.map((v,i)=>el("g",{key:i},el("rect",{x:i*bw+0.5,y:h-((v/mx)*(h-14)),width:bw-1,height:(v/mx)*(h-14),fill:v===maxV?G.gold:color,rx:2,opacity:.85}),labels&&el("text",{x:i*bw+bw/2,y:h,textAnchor:"middle",fontSize:6,fill:G.txtF},labels[i]))));};
-const LineChart=({series,labels,h=100})=>{if(!series||!series.length)return null;const all=series.flatMap(s=>s.data);const mx=Math.max(...all,1)*1.1;const n=series[0].data.length;if(n<2)return null;return el("svg",{viewBox:`0 0 300 ${h}`,style:{width:"100%",height:h}},[0.25,0.5,0.75].map((p,i)=>el("line",{key:i,x1:0,x2:300,y1:h*p,y2:h*p,stroke:G.bdrS,strokeDasharray:"3 5"})),series.map((s,si)=>{const pts=s.data.map((v,i)=>`${i*(300/(n-1))},${h-(v/mx)*(h-12)+6}`).join(" ");return el("g",{key:si},el("polyline",{points:`0,${h} ${pts} ${300},${h}`,fill:s.color+"15"}),el("polyline",{points:pts,fill:"none",stroke:s.color,strokeWidth:"2",strokeDasharray:s.dash||"none"}));}),labels&&labels.map((l,i)=>el("text",{key:i,x:i*(300/(n-1)),y:h+2,textAnchor:"middle",fontSize:6,fill:G.txtF},l)));};
-const Donut=({data,colors,size=80})=>{const total=data.reduce((s,v)=>s+v,0)||1;let off=0;const r=30,cx=size/2,cy=size/2;const slices=data.map((v,i)=>{const a=v/total*360,s1=off*Math.PI/180,e1=(off+a)*Math.PI/180;off+=a;const x1=cx+r*Math.sin(s1),y1=cy-r*Math.cos(s1),x2=cx+r*Math.sin(e1),y2=cy-r*Math.cos(e1);return{d:`M${cx},${cy} L${x1},${y1} A${r},${r} 0 ${a>180?1:0},1 ${x2},${y2} Z`,color:colors[i%colors.length]};});return el("svg",{width:size,height:size,viewBox:`0 0 ${size} ${size}`},slices.map((s,i)=>el("path",{key:i,d:s.d,fill:s.color,stroke:"white",strokeWidth:.5})),el("circle",{cx,cy,r:18,fill:"white"}));};
-const Bdg=({t,c=G.gold,sm})=>el("span",{style:{display:"inline-block",padding:sm?"1px 7px":"3px 10px",borderRadius:20,background:c+"18",color:c,border:`1px solid ${c}30`,fontSize:sm?9:11,fontWeight:700,whiteSpace:"nowrap"}},t);
-const Hbar=({v,mx,c=G.gold,h=6})=>el("div",{style:{height:h,background:G.sur2,borderRadius:3,overflow:"hidden",flex:1}},el("div",{style:{height:"100%",width:`${Math.min((v/(mx||1))*100,100)}%`,background:c,borderRadius:3,transition:"width .5s"}}));
-const KpiCard=({label,val,sub,c,icon,spark,badge,trend})=>el("div",{style:{background:"white",border:`1px solid ${G.bdr}`,borderTop:`3px solid ${c}`,borderRadius:14,padding:"14px 15px",boxShadow:G.shd,animation:"fadeIn .4s"}},el("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:5}},el("div",{style:{fontSize:10,color:G.txtF,fontWeight:600}},icon&&icon+" ",label),el("div",{style:{display:"flex",gap:4}},badge&&el(Bdg,{t:badge,c,sm:true}),trend!==undefined&&el(Bdg,{t:`${trend>=0?"▲":"▼"}${fmtD(Math.abs(trend))}%`,c:trend>=0?G.pos:G.neg,sm:true}))),el("div",{style:{fontSize:20,fontWeight:800,color:c,marginBottom:2,lineHeight:1.2}},val),sub&&el("div",{style:{fontSize:10,color:G.txtF,marginBottom:spark?5:0}},sub),spark&&el(Spark,{data:spark,color:c,w:110,h:24}));
-const Empty=({msg,isAr})=>el("div",{style:{textAlign:"center",padding:"40px 20px",color:G.txtF}},el("div",{style:{fontSize:36,marginBottom:10}},"📭"),el("div",{style:{fontSize:13,fontWeight:700,color:G.txtD,marginBottom:5}},isAr?"لا توجد بيانات":"No Data"),el("div",{style:{fontSize:11}},msg));
-const ExpBtn=({isAr,onP,onE,onPdf})=>el("div",{className:"np",style:{display:"flex",gap:6,alignItems:"center",justifyContent:"flex-end",marginBottom:10,flexWrap:"wrap"}},el("span",{style:{fontSize:10,color:G.txtF}},isAr?"تصدير:":"Export:"),el("button",{onClick:onP,style:{padding:"5px 11px",borderRadius:7,border:`1px solid ${G.bdr}`,background:G.sur,color:G.txtD,fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}},isAr?"🖨 طباعة":"🖨 Print"),el("button",{onClick:onE,style:{padding:"5px 11px",borderRadius:7,border:`1px solid ${G.pos}40`,background:G.pos+"08",color:G.pos,fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}},"📊 Excel"),el("button",{onClick:onPdf,style:{padding:"5px 11px",borderRadius:7,border:`1px solid ${G.gold}`,background:G.goldL,color:G.goldD,fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}},"📄 PDF"));
-const COLORS=[G.inf,G.gold,G.pos,G.pur,G.wrn,G.neg,"#E84393","#00BCD4"];
-
-function App(){
-  const [lang,setLang]=useState("AR");const [money,setMoney]=useState(CURR[0]);const [period,setPeriod]=useState("YTD");const [width,setWidth]=useState(window.innerWidth);const [page,setPage]=useState("home");const [showM,setShowM]=useState(false);
-  const [mode,setMode]=useState("demo");const [data,setData]=useState(DEMO);const [token,setToken]=useState(null);const [tokenType,setTokenType]=useState("apikey");const [subdomain,setSubdomain]=useState("");const [lastSync,setLastSync]=useState(null);const [loadMsg,setLoadMsg]=useState("");const [fetchLog,setFetchLog]=useState([]);const [toasts,setToasts]=useState([]);const [autoMin,setAutoMin]=useState(5);const [showApi,setShowApi]=useState(false);const [iKey,setIKey]=useState("");const [iSub,setISub]=useState("");const [targets,setTargets]=useState({grossMargin:40,netMargin:15,collectionRate:80,dso:35,cashRunway:6});
-  const autoRef=useRef(null);
-  const ar=lang==="AR";const dir=ar?"rtl":"ltr";const SY=ar?money.s:money.sE;const R=money.rate;const mob=width<640;const tab=width>=640&&width<1024;const SW=mob?0:tab?58:230;
-  useEffect(()=>{const fn=()=>setWidth(window.innerWidth);window.addEventListener("resize",fn);return()=>window.removeEventListener("resize",fn);},[]);
-  const toast=useCallback((msg,type="info")=>{const id=Date.now();setToasts(p=>[...p,{id,msg,type}]);setTimeout(()=>setToasts(p=>p.filter(t=>t.id!==id)),3500);},[]);
-  const fetchOne=useCallback(async(ep)=>{const p=new URLSearchParams({apikey:token,endpoint:ep,token_type:tokenType});if(subdomain)p.append("subdomain",subdomain);const res=await fetch(`/api/daftra?${p}`);const json=await res.json();if(!res.ok)throw new Error(json.message||`HTTP ${res.status}`);return json;},[token,tokenType,subdomain]);
-  const loadReal=useCallback(async()=>{
-    if(!token)return;setMode("loading");setData(EMPTY);const log=[];
-    const step=async(label,ep,key,mapFn)=>{setLoadMsg(ar?`جاري جلب ${label}...`:`Loading ${label}...`);try{const raw=await fetchOne(ep);const items=parseResp(raw,key).map(mapFn);log.push({label,count:items.length,ok:true});return items;}catch(e){log.push({label,count:0,ok:false});return [];}};
-    const inv=await step(ar?"الفواتير":"Invoices","invoices","Invoices",mapInv);
-    const inc=await step(ar?"الإيرادات الأخرى":"Other Income","incomes","Incomes",mapInc);
-    const pur=await step(ar?"المشتريات":"Purchases","purchase_invoices","PurchaseInvoices",mapPur);
-    const exp=await step(ar?"المصروفات":"Expenses","expenses","Expenses",mapExp);
-    const cli=await step(ar?"العملاء":"Clients","clients","Clients",mapCli);
-    const sup=await step(ar?"الموردون":"Suppliers","suppliers","Suppliers",mapSup);
-    const tre=await step(ar?"الخزينة":"Treasuries","treasuries","Treasuries",mapTre);
-    setData({invoices:inv,incomes:inc,purchaseInvoices:pur,expenses:exp,clients:cli,suppliers:sup,treasuries:tre});
-    setFetchLog(log);setLastSync(new Date());setLoadMsg("");
-    const ok=log.filter(l=>l.ok).length;
-    if(ok===log.length){setMode("connected");toast(ar?`✅ تم جلب ${inv.length} فاتورة`:`✅ Loaded ${inv.length} invoices`,"success");}
-    else if(ok>0){setMode("connected");toast(ar?`⚠️ ${ok}/${log.length} مصادر`:`⚠️ ${ok}/${log.length} sources`,"warn");}
-    else{setMode("error");setData(EMPTY);toast(ar?"❌ فشل جلب البيانات":"❌ Failed","error");}
-  },[token,ar,fetchOne,toast]);
-  useEffect(()=>{try{const s=JSON.parse(sessionStorage.getItem("clink_cfo_v5")||"{}");if(s.token){setToken(s.token);setTokenType(s.tt||"apikey");setSubdomain(s.sd||"");return;}}catch{}const p=new URLSearchParams(window.location.search);const auth=p.get("auth");if(auth==="success"){const tk=p.get("token")||"",tt=(p.get("token_type")||"bearer").toLowerCase(),sd=p.get("subdomain")||"";if(tk){setToken(tk);setTokenType(tt);setSubdomain(sd);sessionStorage.setItem("clink_cfo_v5",JSON.stringify({token:tk,tt,sd}));window.history.replaceState({},"","/");}}else if(auth==="error"){setMode("error");toast(p.get("reason")||"Error","error");window.history.replaceState({},"","/");}},[]);
-  useEffect(()=>{if(token)loadReal();},[token]);
-  useEffect(()=>{clearInterval(autoRef.current);if(token&&mode==="connected"&&autoMin>0)autoRef.current=setInterval(loadReal,autoMin*60*1000);return()=>clearInterval(autoRef.current);},[token,mode,autoMin,loadReal]);
-  const disconnect=()=>{clearInterval(autoRef.current);sessionStorage.removeItem("clink_cfo_v5");setToken(null);setSubdomain("");setMode("demo");setData(DEMO);setFetchLog([]);toast(ar?"تم قطع الاتصال":"Disconnected","info");};
-  const loginOAuth=()=>{const rd=encodeURIComponent(window.location.origin+"/callback");window.location.href=`https://app.daftra.com/oauth/authorize?client_id=565&redirect_uri=${rd}&response_type=code`;};
-  const connectKey=()=>{const key=iKey.trim(),sub=iSub.trim();if(!key){toast(ar?"أدخل API Key":"Enter API Key","error");return;}setToken(key);setTokenType("apikey");setSubdomain(sub);sessionStorage.setItem("clink_cfo_v5",JSON.stringify({token:key,tt:"apikey",sd:sub}));setShowApi(false);setIKey("");setISub("");};
-
-  const fd=useMemo(()=>({inv:byPeriod(data.invoices,period),inc:byPeriod(data.incomes,period),pur:byPeriod(data.purchaseInvoices,period),exp:byPeriod(data.expenses,period)}),[data,period]);
-
-  const K=useMemo(()=>{
-    const rev=fd.inv.reduce((s,i)=>s+i.amount,0),revPd=fd.inv.reduce((s,i)=>s+i.paid,0),otInc=fd.inc.reduce((s,i)=>s+i.amount,0),totRev=rev+otInc;
-    const exp=fd.exp.reduce((s,e)=>s+e.amount,0),pur=fd.pur.reduce((s,p)=>s+p.amount,0),purPd=fd.pur.reduce((s,p)=>s+p.paid,0);
-    const gp=rev-pur,ebit=gp-exp,tax=Math.max(ebit*0.225,0),np=ebit-tax;
-    const arBal=data.invoices.reduce((s,i)=>s+(i.amount-i.paid),0),apBal=data.purchaseInvoices.reduce((s,p)=>s+(p.amount-p.paid),0);
-    const ovAR=data.clients.reduce((s,c)=>s+(c.overdue||0),0),ovAP=data.suppliers.reduce((s,s2)=>s+(s2.overdue||0),0);
-    const cash=data.treasuries.reduce((s,t)=>s+(t.currency==="EGP"?t.balance:t.balance*50),0);
-    const annRev=period==="MTD"?rev*12:period==="QTD"?rev*4:rev,annPur=period==="MTD"?pur*12:period==="QTD"?pur*4:pur;
-    const dso=annRev>0?(arBal/(annRev/365)):0,dpo=annPur>0?(apBal/(annPur/365)):0,ccc=dso-dpo;
-    const gm=rev>0?(gp/rev)*100:0,nm=totRev>0?(np/totRev)*100:0,ebitM=rev>0?(ebit/rev)*100:0;
-    const burn=period==="YTD"?(exp/12):period==="QTD"?(exp/3):exp,runway=burn>0?cash/burn:0,coll=rev>0?(revPd/rev)*100:0;
-    const mRev=Array(12).fill(0),mExp=Array(12).fill(0),mNP=Array(12).fill(0);
-    data.invoices.forEach(i=>{const m=mOf(i.date);if(m>=0)mRev[m]+=i.amount;});
-    data.expenses.forEach(e=>{const m=mOf(e.date);if(m>=0)mExp[m]+=e.amount;});
-    for(let i=0;i<12;i++)mNP[i]=mRev[i]-mExp[i];
-    const ct={};data.invoices.forEach(i=>{ct[i.client]=(ct[i.client]||0)+i.amount;});
-    const topC=Object.entries(ct).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([name,amt])=>({name,amt,pct:rev>0?(amt/rev)*100:0}));
-    const expCat={};fd.exp.forEach(e=>{const k=e.categoryEn;expCat[k]=(expCat[k]||0)+e.amount;});
-    const today=new Date();
-    const arAg=[0,0,0,0],apAg=[0,0,0,0];
-    fd.inv.filter(i=>i.status!=="paid").forEach(i=>{const d=Math.floor((today-new Date(i.date))/(864e5));const b=Math.max(agBkt(d)-1,0);if(b<4)arAg[b]+=i.amount-i.paid;});
-    fd.pur.filter(p=>p.status!=="paid").forEach(p=>{const d=Math.floor((today-new Date(p.date))/(864e5));const b=Math.max(agBkt(d)-1,0);if(b<4)apAg[b]+=p.amount-p.paid;});
-    const opExp=fd.exp.filter(e=>e.type==="operating").reduce((s,e)=>s+e.amount,0);
-    const gaExp=fd.exp.filter(e=>e.type!=="operating").reduce((s,e)=>s+e.amount,0);
-    return{rev,revPd,otInc,totRev,exp,pur,purPd,gp,ebit,tax,np,arBal,apBal,ovAR,ovAP,cash,dso,dpo,ccc,gm,nm,ebitM,burn,runway,coll,mRev,mExp,mNP,topC,expCat,opExp,gaExp,arAg,apAg,invCnt:fd.inv.length};
-  },[fd,data,period]);
-
-  const ALTS=useMemo(()=>[
-    {level:K.runway<3?"critical":K.runway<6?"warn":"ok",icon:"⏱️",cat:ar?"السيولة":"Liquidity",title:ar?`Cash Runway: ${fmtD(K.runway,1)} أشهر`:`Cash Runway: ${fmtD(K.runway,1)} months`,action:ar?"مراجعة التدفق النقدي":"Review cash flow"},
-    {level:K.dso>60?"critical":K.dso>targets.dso?"warn":"ok",icon:"📅",cat:"DSO",title:ar?`DSO: ${fmtD(K.dso,0)} يوم`:`DSO: ${fmtD(K.dso,0)}d`,action:ar?"تسريع التحصيل":"Accelerate collections"},
-    {level:K.coll<60?"critical":K.coll<targets.collectionRate?"warn":"ok",icon:"💰",cat:ar?"التحصيل":"Collection",title:ar?`نسبة التحصيل: ${fmtD(K.coll)}%`:`Collection: ${fmtD(K.coll)}%`,action:ar?"متابعة الذمم":"Follow up"},
-    {level:K.nm<0?"critical":K.nm<targets.netMargin?"warn":"ok",icon:"📊",cat:ar?"الربحية":"Profitability",title:ar?`هامش الصافي: ${fmtD(K.nm)}%`:`Net margin: ${fmtD(K.nm)}%`,action:ar?"مراجعة التكاليف":"Review costs"},
-    {level:K.ovAR>K.arBal*0.5?"critical":K.ovAR>0?"warn":"ok",icon:"📄",cat:ar?"ذمم متأخرة":"Overdue AR",title:ar?`متأخرات AR: ${fmt(K.ovAR*R)} ${SY}`:`Overdue AR: ${fmt(K.ovAR*R)} ${SY}`,action:ar?"التواصل مع العملاء":"Contact clients"},
-    {level:K.gm<20?"critical":K.gm<targets.grossMargin?"warn":"ok",icon:"📈",cat:ar?"الهامش الإجمالي":"Gross Margin",title:ar?`هامش إجمالي: ${fmtD(K.gm)}%`:`Gross margin: ${fmtD(K.gm)}%`,action:ar?"مراجعة تكلفة المشتريات":"Review purchase costs"},
-    {level:K.ovAP>K.apBal*0.5?"warn":"ok",icon:"🏪",cat:"AP",title:ar?`متأخرات موردين: ${fmt(K.ovAP*R)} ${SY}`:`Overdue AP: ${fmt(K.ovAP*R)} ${SY}`,action:ar?"ترتيب السداد":"Arrange payments"},
-  ],[K,targets,ar,SY,R]);
-  const critA=ALTS.filter(a=>a.level==="critical"),warnA=ALTS.filter(a=>a.level==="warn"),okA=ALTS.filter(a=>a.level==="ok");
-
-  const doExcel=()=>{const rows=[[ar?"المؤشر":"KPI",ar?"القيمة":"Value"],[ar?"إيراد تشغيلي":"Op. Revenue",`${fmt(K.rev*R)} ${SY}`],[ar?"إيرادات أخرى":"Other Income",`${fmt(K.otInc*R)} ${SY}`],[ar?"إجمالي الربح":"Gross Profit",`${fmt(K.gp*R)} ${SY}`],["GM",`${fmtD(K.gm)}%`],["EBIT",`${fmt(K.ebit*R)} ${SY}`],[ar?"صافي الربح":"Net",`${fmt(K.np*R)} ${SY}`],["NM",`${fmtD(K.nm)}%`],["AR",`${fmt(K.arBal*R)} ${SY}`],["AP",`${fmt(K.apBal*R)} ${SY}`],[ar?"الخزينة":"Cash",`${fmt(K.cash*R)} ${SY}`],["DSO",`${fmtD(K.dso,0)}d`],["DPO",`${fmtD(K.dpo,0)}d`],["CCC",`${fmtD(K.ccc,0)}d`],["Runway",`${fmtD(K.runway,1)}mo`]];const csv="\uFEFF"+rows.map(r=>r.join(",")).join("\n");const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download=`CLink_CFO_v5_${mode==="connected"?"LIVE":"DEMO"}_${period}.csv`;a.click();toast(ar?"✅ تم تصدير Excel":"✅ Excel","success");};
-
-  const LoadOv=()=>el("div",{style:{position:"fixed",inset:0,background:"rgba(255,253,247,.96)",zIndex:998,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:20}},el(Logo,{size:60}),el("div",{style:{width:48,height:48,border:`4px solid ${G.bdrS}`,borderTop:`4px solid ${G.gold}`,borderRadius:"50%",animation:"spin 1s linear infinite"}}),el("div",{style:{fontSize:15,fontWeight:700,color:G.goldD}},ar?"جاري جلب بياناتك...":"Loading your data..."),loadMsg&&el("div",{style:{fontSize:11,color:G.txtF}},loadMsg));
-  
-  const ApiMod=()=>el("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}},el("div",{style:{background:"white",borderRadius:16,padding:"24px 28px",width:"100%",maxWidth:420,boxShadow:"0 20px 60px rgba(0,0,0,.3)",animation:"fadeIn .3s"}},el("div",{style:{fontSize:16,fontWeight:800,color:G.goldD,marginBottom:4}},"🔑 "+(ar?"إدخال API Key من دفترة":"Enter Daftra API Key")),el("div",{style:{fontSize:11,color:G.txtF,marginBottom:18,lineHeight:1.7}},ar?"دفترة ← الإعدادات ← API Keys ← استخدم internalApi":"Daftra → Settings → API Keys → use internalApi"),el("div",{style:{marginBottom:12}},el("label",{style:{fontSize:11,fontWeight:700,color:G.txt,display:"block",marginBottom:5}},ar?"🔑 API Key":"🔑 API Key"),el("input",{type:"text",value:iKey,onChange:e=>setIKey(e.target.value),onKeyDown:e=>e.key==="Enter"&&connectKey(),placeholder:"Paste API Key...",style:{width:"100%",padding:"10px 12px",borderRadius:8,border:`1.5px solid ${G.bdr}`,fontSize:12,outline:"none",direction:"ltr"}})),el("div",{style:{marginBottom:18}},el("label",{style:{fontSize:11,fontWeight:700,color:G.txt,display:"block",marginBottom:5}},ar?"🌐 اسم الشركة (subdomain)":"🌐 Subdomain"),el("div",{style:{display:"flex",alignItems:"center",gap:6}},el("input",{type:"text",value:iSub,onChange:e=>setISub(e.target.value),placeholder:"arabfoodgate",style:{flex:1,padding:"10px 12px",borderRadius:8,border:`1.5px solid ${G.bdr}`,fontSize:12,outline:"none",direction:"ltr"}}),el("span",{style:{fontSize:11,color:G.txtF,whiteSpace:"nowrap"}},".daftra.com"))),el("div",{style:{display:"flex",gap:10}},el("button",{onClick:connectKey,style:{flex:1,padding:"11px",borderRadius:8,border:"none",background:G.gold,color:"white",fontSize:13,fontWeight:800,cursor:"pointer",fontFamily:"inherit"}},ar?"🔗 اتصال":"🔗 Connect"),el("button",{onClick:()=>{setShowApi(false);setIKey("");setISub("");},style:{padding:"11px 16px",borderRadius:8,border:`1px solid ${G.bdr}`,background:G.sur,color:G.txtD,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}},ar?"إلغاء":"Cancel"))));
-
-  const ConnBar=()=>{const isDemo=mode==="demo";const tc=mode==="connected"?G.pos:isDemo?G.wrn:G.neg;return el("div",{className:"np",style:{padding:"8px 16px",background:tc+"10",borderBottom:`1px solid ${tc}20`,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}},el("div",{style:{display:"flex",alignItems:"center",gap:8}},el("div",{style:{width:8,height:8,borderRadius:"50%",background:tc}}),el("div",null,el("div",{style:{fontSize:11,fontWeight:700,color:tc}},mode==="connected"?(ar?"✅ متصل بدفترة — بياناتك الحقيقية":"✅ Connected — Live Daftra Data"):mode==="loading"?(ar?"⏳ جاري الاتصال...":"⏳ Connecting..."):mode==="error"?(ar?"❌ خطأ":"❌ Error"):(ar?"🔷 وضع تجريبي — ليست بياناتك":"🔷 Demo Mode")),mode==="connected"&&el("div",{style:{fontSize:9,color:G.txtF,marginTop:1}},(subdomain?subdomain+" | ":" ")+(ar?`آخر تحديث: ${lastSync?.toLocaleTimeString("ar-EG")}`:`Last sync: ${lastSync?.toLocaleTimeString("en")}`)))),el("div",{style:{display:"flex",gap:6}},mode==="connected"?el(React.Fragment,null,el("button",{onClick:loadReal,style:{padding:"4px 10px",borderRadius:7,border:`1px solid ${G.gold}`,background:G.goldL,color:G.goldD,fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}},ar?"🔄 تحديث":"🔄 Refresh"),el("button",{onClick:()=>setPage("settings"),style:{padding:"4px 10px",borderRadius:7,border:`1px solid ${G.bdr}`,background:"white",color:G.txtD,fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}},ar?"⚙️ إعدادات":"⚙️ Settings"),el("button",{onClick:disconnect,style:{padding:"4px 10px",borderRadius:7,border:`1px solid ${G.neg}30`,background:G.neg+"08",color:G.neg,fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}},ar?"⏏ قطع":"⏏ Disconnect")):el(React.Fragment,null,el("button",{onClick:()=>setShowApi(true),style:{padding:"5px 12px",borderRadius:7,border:"none",background:G.gold,color:"white",fontSize:11,fontWeight:800,cursor:"pointer",fontFamily:"inherit"}},ar?"🔑 API Key":"🔑 API Key"),el("button",{onClick:loginOAuth,style:{padding:"5px 12px",borderRadius:7,border:`1.5px solid ${G.gold}`,background:"white",color:G.goldD,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}},ar?"🔗 OAuth":"🔗 OAuth"),el("button",{onClick:()=>setPage("settings"),style:{padding:"5px 8px",borderRadius:7,border:`1px solid ${G.bdr}`,background:G.sur,color:G.txtD,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}},"⚙️"))));};
-
-  const Sidebar=()=>el("div",{className:"np",style:{width:SW,position:"fixed",top:0,[ar?"right":"left"]:0,bottom:0,background:"white",zIndex:20,borderLeft:ar?`1px solid ${G.bdr}`:"none",borderRight:!ar?`1px solid ${G.bdr}`:"none",display:"flex",flexDirection:"column",boxShadow:G.shd}},el("div",{style:{padding:tab?"10px 6px":"12px 14px",borderBottom:`1px solid ${G.bdrS}`,display:"flex",alignItems:"center",gap:8}},el(Logo,{size:tab?32:28}),!tab&&el("div",null,el("div",{style:{fontSize:13,fontWeight:900,color:G.goldD,lineHeight:1,fontFamily:"Georgia,serif"}},"CLink",el("span",{style:{color:G.gold}},"·")),el("div",{style:{fontSize:7,color:G.gold,letterSpacing:2,fontWeight:700,textTransform:"uppercase",marginTop:1}},"CFO v5"))),!tab&&el("div",{style:{margin:"8px 10px 0",padding:"4px 8px",borderRadius:7,background:mode==="connected"?G.pos+"12":G.wrn+"10",textAlign:"center"}},el("div",{style:{fontSize:9,fontWeight:800,color:mode==="connected"?G.pos:G.wrn}},mode==="connected"?(ar?"🟢 بيانات حقيقية":"🟢 Live"):(ar?"🟡 وضع تجريبي":"🟡 Demo"))),critA.length>0&&!tab&&el("div",{style:{margin:"4px 10px 0",padding:"4px 8px",borderRadius:7,background:G.neg+"12",textAlign:"center",cursor:"pointer"},onClick:()=>setPage("alerts")},el("div",{style:{fontSize:9,fontWeight:800,color:G.neg}},`🚨 ${critA.length} ${ar?"تنبيه عاجل":"critical"}`)),el("nav",{style:{flex:1,padding:tab?"8px 4px":"10px 8px",overflowY:"auto",marginTop:4}},NAV.map(n=>el("div",{key:n.id,onClick:()=>setPage(n.id),style:{display:"flex",alignItems:"center",gap:tab?0:8,justifyContent:tab?"center":"flex-start",padding:tab?"10px":"8px 10px",borderRadius:8,marginBottom:2,cursor:"pointer",background:page===n.id?G.goldP:"transparent",border:`1px solid ${page===n.id?G.gold+"50":"transparent"}`,color:page===n.id?G.gold:n.id==="alerts"&&critA.length>0?G.neg:G.txtF,fontWeight:page===n.id?700:400,fontSize:12,position:"relative"}},el("span",{style:{fontSize:14,flexShrink:0}},n.icon),!tab&&el("span",null,ar?n.ar:n.en),!tab&&n.id==="alerts"&&critA.length>0&&el("span",{style:{marginRight:ar?"auto":"",marginLeft:ar?"":"auto",background:G.neg,color:"white",fontSize:8,fontWeight:800,borderRadius:10,padding:"1px 5px"}},critA.length)))),!tab&&el("div",{style:{padding:"8px 12px",borderTop:`1px solid ${G.bdrS}`,fontSize:9,color:G.txtF}},"InvestorProHub | CFO v5.0"));
-  const BotNav=()=>el("div",{className:"np",style:{position:"fixed",bottom:0,left:0,right:0,background:"white",borderTop:`1px solid ${G.bdr}`,display:"flex",zIndex:20,overflowX:"auto"}},NAV.map(n=>el("div",{key:n.id,onClick:()=>setPage(n.id),style:{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"4px 2px",cursor:"pointer",minWidth:44,color:page===n.id?G.gold:n.id==="alerts"&&critA.length>0?G.neg:G.txtF,borderTop:`2px solid ${page===n.id?G.gold:"transparent"}`,background:page===n.id?G.goldP:"transparent",position:"relative"}},el("span",{style:{fontSize:12,marginBottom:1}},n.icon),el("span",{style:{fontSize:6,fontWeight:page===n.id?700:400}},(ar?n.ar:n.en).split(" ")[0]),n.id==="alerts"&&critA.length>0&&el("span",{style:{position:"absolute",top:2,right:4,background:G.neg,color:"white",fontSize:7,borderRadius:8,padding:"0 3px"}},critA.length))));
-  const ToastEl=()=>el("div",{style:{position:"fixed",[ar?"left":"right"]:16,bottom:mob?72:16,zIndex:9999,display:"flex",flexDirection:"column",gap:8}},toasts.map(t=>el("div",{key:t.id,style:{padding:"10px 16px",borderRadius:10,fontSize:12,fontWeight:700,maxWidth:300,background:t.type==="success"?G.pos:t.type==="error"?G.neg:t.type==="warn"?G.wrn:G.gold,color:"white",boxShadow:"0 4px 16px rgba(0,0,0,.2)",animation:"slideIn .3s"}},t.msg)));
-  const Header=()=>el("div",{className:"np",style:{padding:"10px 16px",borderBottom:`1px solid ${G.bdrS}`,background:"white",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}},el("h1",{style:{fontSize:mob?13:16,fontWeight:800,color:G.txt,margin:0}},NAV.find(n=>n.id===page)?.[ar?"ar":"en"]),el("div",{style:{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}},el("div",{style:{display:"flex",borderRadius:8,overflow:"hidden",border:`1px solid ${G.bdr}`}},["MTD","QTD","YTD"].map(p=>el("button",{key:p,onClick:()=>setPeriod(p),style:{padding:"5px 9px",border:"none",background:period===p?G.gold:"transparent",color:period===p?"white":G.txtF,fontSize:10,fontWeight:800,cursor:"pointer",fontFamily:"inherit"}},p))),el("div",{style:{display:"flex",borderRadius:8,overflow:"hidden",border:`1px solid ${G.bdr}`}},["AR","EN"].map(l=>el("button",{key:l,onClick:()=>setLang(l),style:{padding:"5px 9px",border:"none",background:lang===l?G.gold:"transparent",color:lang===l?"white":G.txtF,fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}},l))),el("div",{style:{position:"relative"}},el("button",{onClick:()=>setShowM(v=>!v),style:{display:"flex",alignItems:"center",gap:5,padding:"5px 9px",borderRadius:8,border:`1.5px solid ${G.gold}`,background:"white",color:G.goldD,fontSize:11,fontWeight:800,cursor:"pointer",fontFamily:"inherit"}},money.f," ",SY," ",el("span",{style:{fontSize:8}},showM?"▲":"▼")),showM&&el("div",{style:{position:"absolute",top:"calc(100% + 6px)",[ar?"left":"right"]:0,background:"white",border:`1px solid ${G.bdr}`,borderRadius:10,boxShadow:"0 8px 24px rgba(0,0,0,.12)",zIndex:999,width:200,overflow:"hidden"}},CURR.map(c=>el("div",{key:c.code,onClick:()=>{setMoney(c);setShowM(false);},style:{display:"flex",alignItems:"center",gap:8,padding:"8px 12px",cursor:"pointer",background:money.code===c.code?G.goldP:"transparent",borderBottom:`1px solid ${G.bdrS}`}},el("span",{style:{fontSize:18}},c.f),el("div",{style:{flex:1}},el("div",{style:{fontSize:11,fontWeight:700,color:G.txt}},ar?c.n:c.nE),el("div",{style:{fontSize:9,color:G.txtF}},c.sE)),money.code===c.code&&el("span",{style:{color:G.gold}},"✓")))))));
-
-  const months=Array(12).fill(0).map((_,i)=>ar?MAR[i]:MEN[i]);
-
-  // ══ HOME ═════════════════════════════════════════════════
-  const PHome=()=>el("div",{style:{animation:"fadeIn .4s"}},
-    el("div",{style:{background:`linear-gradient(135deg,${G.gold},${G.goldD})`,borderRadius:14,padding:"16px 20px",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center",boxShadow:`0 4px 20px ${G.gold}50`,flexWrap:"wrap",gap:12}},
-      el("div",null,
-        el("div",{style:{fontSize:10,color:"rgba(255,255,255,.85)",fontWeight:600,marginBottom:4}},`${ar?"ملخص CFO":"CFO Overview"} — ${period} ${mode==="connected"?(ar?"| ✅ حقيقي":"| ✅ Live"):(ar?"| 🔷 تجريبي":"| 🔷 Demo")}`),
-        el("div",{style:{fontSize:mob?22:32,fontWeight:900,color:"white",lineHeight:1.1}},`${fmt(K.totRev*R)} `,el("span",{style:{fontSize:14,opacity:.85}},SY)),
-        el("div",{style:{fontSize:10,color:"rgba(255,255,255,.7)",marginTop:3}},ar?"إجمالي الإيرادات (تشغيلي + أخرى)":"Total Revenue (operational + other)"),
-        critA.length>0&&el("div",{style:{marginTop:8,display:"inline-flex",alignItems:"center",gap:6,background:"rgba(255,255,255,.2)",borderRadius:8,padding:"4px 10px"}},el("span",null,"🚨"),el("span",{style:{fontSize:10,color:"white",fontWeight:700}},`${critA.length} ${ar?"تنبيه عاجل":"critical"}`))
-      ),
-      el("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,textAlign:"center"}},
-        [{l:ar?"هامش إجمالي":"GM",v:`${fmtD(K.gm)}%`,ok:K.gm>=targets.grossMargin},{l:ar?"هامش صافي":"NM",v:`${fmtD(K.nm)}%`,ok:K.nm>=targets.netMargin},{l:"Cash Runway",v:`${fmtD(K.runway,1)}m`,ok:K.runway>=targets.cashRunway},{l:"CCC",v:`${fmtD(K.ccc,0)}d`,ok:K.ccc<30}]
-        .map((x,i)=>el("div",{key:i,style:{background:"rgba(255,255,255,.15)",borderRadius:8,padding:"6px 10px"}},el("div",{style:{fontSize:9,color:"rgba(255,255,255,.75)"}},x.l),el("div",{style:{fontSize:13,fontWeight:800,color:"white"}},x.v),el("div",{style:{fontSize:10}},x.ok?"✅":"⚠️")))
-      )
-    ),
-    el("div",{style:{background:"white",border:`1px solid ${G.bdr}`,borderRadius:14,padding:"14px 16px",boxShadow:G.shd,marginBottom:16}},
-      el("div",{style:{fontSize:13,fontWeight:700,color:G.goldD,marginBottom:12}},ar?"◈ لوحة الإشارات":"◈ Signal Board"),
-      el("div",{style:{display:"grid",gridTemplateColumns:mob?"1fr 1fr":"repeat(4,1fr)",gap:8}},
-        ALTS.map((a,i)=>{const bc=a.level==="critical"?G.neg:a.level==="warn"?G.wrn:G.pos;return el("div",{key:i,style:{padding:"8px 10px",borderRadius:10,background:bc+"10",border:`1px solid ${bc}25`,display:"flex",alignItems:"center",gap:8}},el("span",{style:{fontSize:16,flexShrink:0}},a.icon),el("div",null,el("div",{style:{fontSize:9,color:G.txtF,fontWeight:600}},a.cat),el("div",{style:{fontSize:10,color:bc,fontWeight:700}},a.level==="critical"?"🚨 عاجل":a.level==="warn"?"⚠️ تحذير":"✅ طبيعي")));})
-      )
-    ),
-    el("div",{style:{display:"grid",gridTemplateColumns:mob?"1fr 1fr":"repeat(4,1fr)",gap:12,marginBottom:16}},
-      el(KpiCard,{label:ar?"الإيراد التشغيلي":"Op. Revenue",val:`${fmt(K.rev*R)} ${SY}`,sub:`${K.invCnt} ${ar?"فاتورة":"inv"}`,c:G.inf,icon:"📄",spark:K.mRev}),
-      el(KpiCard,{label:ar?"إجمالي الربح":"Gross Profit",val:`${fmt(K.gp*R)} ${SY}`,sub:`GM: ${fmtD(K.gm)}%`,c:G.pos,icon:"📈",badge:K.gm>=targets.grossMargin?"✅":"⚠️"}),
-      el(KpiCard,{label:"EBIT",val:`${fmt(K.ebit*R)} ${SY}`,sub:`${fmtD(K.ebitM)}%`,c:G.gold,icon:"💡"}),
-      el(KpiCard,{label:ar?"صافي الربح":"Net Profit",val:`${fmt(K.np*R)} ${SY}`,sub:`NM: ${fmtD(K.nm)}%`,c:K.np>=0?G.pur:G.neg,icon:"💰",badge:K.nm>=targets.netMargin?"✅":"⚠️"})
-    ),
-    el("div",{style:{display:"grid",gridTemplateColumns:mob?"1fr 1fr":"repeat(4,1fr)",gap:12,marginBottom:16}},
-      el(KpiCard,{label:ar?"الخزينة والبنوك":"Cash & Banks",val:`${fmt(K.cash*R)} ${SY}`,sub:`Runway: ${fmtD(K.runway,1)}${ar?"أشهر":"mo"}`,c:K.runway>=targets.cashRunway?G.pos:G.neg,icon:"🏦"}),
-      el(KpiCard,{label:ar?"الذمم المدينة":"Accounts Receivable",val:`${fmt(K.arBal*R)} ${SY}`,sub:`${ar?"متأخر":"Overdue"}: ${fmt(K.ovAR*R)} ${SY}`,c:G.inf,icon:"◆"}),
-      el(KpiCard,{label:ar?"الذمم الدائنة":"Accounts Payable",val:`${fmt(K.apBal*R)} ${SY}`,sub:`${ar?"متأخر":"Overdue"}: ${fmt(K.ovAP*R)} ${SY}`,c:G.wrn,icon:"◎"}),
-      el(KpiCard,{label:"Cash Conversion Cycle",val:`${fmtD(K.ccc,0)} ${ar?"يوم":"d"}`,sub:`DSO: ${fmtD(K.dso,0)}d | DPO: ${fmtD(K.dpo,0)}d`,c:K.ccc<30?G.pos:K.ccc<60?G.wrn:G.neg,icon:"🔄"})
-    ),
-    el("div",{style:{background:"white",border:`1px solid ${G.bdr}`,borderRadius:14,padding:"16px 18px",boxShadow:G.shd}},
-      el("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}},
-        el("div",{style:{fontSize:13,fontWeight:700,color:G.goldD}},ar?"▲ الاتجاه الشهري — 12 شهر":"▲ Monthly Trend — 12 Months"),
-        el(ExpBtn,{isAr:ar,onP:()=>window.print(),onE:doExcel,onPdf:()=>window.print()})
-      ),
-      el(LineChart,{series:[{data:K.mRev,color:G.inf,dash:"none"},{data:K.mNP,color:G.pos,dash:"4 3"},{data:K.mExp,color:G.neg,dash:"2 3"}],labels:months,h:mob?100:130}),
-      el("div",{style:{display:"flex",gap:16,marginTop:8,justifyContent:"center",flexWrap:"wrap"}},
-        [[G.inf,ar?"الإيراد":"Revenue"],[G.pos,ar?"صافي الربح":"Net Profit"],[G.neg,ar?"المصروفات":"Expenses"]]
-        .map(([c,l])=>el("div",{key:l,style:{display:"flex",alignItems:"center",gap:5}},el("div",{style:{width:14,height:2,background:c}}),el("span",{style:{fontSize:10,color:G.txtD}},l)))
-      )
-    )
-  );
-
-  // ══ P&L ══════════════════════════════════════════════════
-  const PPL=()=>el("div",{style:{animation:"fadeIn .4s"}},
-    el(ExpBtn,{isAr:ar,onP:()=>window.print(),onE:doExcel,onPdf:()=>window.print()}),
-    el("div",{style:{display:"grid",gridTemplateColumns:mob?"1fr":"3fr 2fr",gap:14}},
-      el("div",{style:{background:"white",border:`1px solid ${G.bdr}`,borderRadius:14,padding:"18px 20px",boxShadow:G.shd}},
-        el("div",{style:{textAlign:"center",marginBottom:16,paddingBottom:12,borderBottom:`2px solid ${G.gold}`}},
-          el("div",{style:{fontSize:9,color:G.txtF,letterSpacing:2,marginBottom:3}},"INCOME STATEMENT"),
-          el("div",{style:{fontSize:16,fontWeight:900,color:G.goldD,fontFamily:"Georgia,serif"}},ar?"قائمة الدخل":"Profit & Loss"),
-          el("div",{style:{fontSize:10,color:G.txtF,marginTop:3}},`${period} | ${SY}`)
-        ),
-        [{l:ar?"إيراد تشغيلي (فواتير)":"Operational Revenue",v:K.rev,c:G.inf,b:true,i:0},
-         {l:ar?"إيرادات أخرى":"Other Income",v:K.otInc,c:G.inf,b:false,i:1},
-         {l:ar?"إجمالي الإيرادات":"Total Revenue",v:K.totRev,c:G.inf,b:true,i:0,line:true},
-         {l:ar?"(−) تكلفة المشتريات":"(−) Purchases",v:-K.pur,c:G.neg,b:false,i:1},
-         {l:ar?"إجمالي الربح":"Gross Profit",v:K.gp,c:G.pos,b:true,i:0,s:`GM: ${fmtD(K.gm)}%`,line:true},
-         {l:ar?"(−) المصروفات التشغيلية":"(−) Operating Expenses",v:-K.exp,c:G.neg,b:false,i:1},
-         {l:ar?"EBIT (الربح التشغيلي)":"EBIT",v:K.ebit,c:G.gold,b:true,i:0,s:`${fmtD(K.ebitM)}%`,line:true},
-         {l:ar?"(−) الضريبة 22.5%":"(−) Tax 22.5%",v:-K.tax,c:G.neg,b:false,i:1},
-         {l:ar?"صافي الربح":"Net Profit",v:K.np,c:K.np>=0?G.pur:G.neg,b:true,i:0,s:`NM: ${fmtD(K.nm)}%`,big:true,line:true}]
-        .map(({l,v,c,b,i,s,big,line},idx)=>el("div",{key:idx,style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:big?"12px 0 4px":`${line?"8px":"4px"} 0`,borderBottom:line?`1.5px solid ${G.bdr}`:`1px solid ${G.bdrS}`,borderTop:big?`2px solid ${G.bdr}`:"none",marginTop:big?4:0,[ar?"paddingRight":"paddingLeft"]:`${i*12}px`}},
-          el("span",{style:{fontSize:big?12:10,color:b?G.txt:G.txtD,fontWeight:b?700:400}},l),
-          el("div",{style:{display:"flex",alignItems:"baseline",gap:6}},
-            s&&el("span",{style:{fontSize:9,color:G.txtF}},s),
-            el("span",{style:{fontSize:big?15:11,fontWeight:b?800:600,color:c}},v<0?"(":"",fmt(Math.abs(v)*R),v<0?")":""," ",SY)
-          )
-        ))
-      ),
-      el("div",{style:{display:"flex",flexDirection:"column",gap:12}},
-        el("div",{style:{background:"white",border:`1px solid ${G.bdr}`,borderRadius:14,padding:"16px 18px",boxShadow:G.shd}},
-          el("div",{style:{fontSize:13,fontWeight:700,color:G.goldD,marginBottom:14}},ar?"النسب المالية":"Financial Ratios"),
-          [{l:ar?"هامش الربح الإجمالي":"Gross Margin",v:K.gm,t:targets.grossMargin,c:G.pos,u:"%"},{l:"EBIT Margin",v:K.ebitM,t:15,c:G.gold,u:"%"},{l:ar?"هامش الصافي":"Net Margin",v:K.nm,t:targets.netMargin,c:G.pur,u:"%"},{l:ar?"نسبة التحصيل":"Collection",v:K.coll,t:targets.collectionRate,c:G.inf,u:"%"}]
-          .map((x,i)=>el("div",{key:i,style:{marginBottom:14}},
-            el("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:4}},
-              el("span",{style:{fontSize:11,color:G.txt,fontWeight:600}},x.l),
-              el("div",{style:{display:"flex",alignItems:"center",gap:6}},el("span",{style:{fontSize:13,fontWeight:800,color:x.v>=x.t?x.c:G.neg}},`${fmtD(x.v)}${x.u}`),el("span",null,x.v>=x.t?"✅":"⚠️"))
-            ),
-            el(Hbar,{v:Math.min(x.v,120),mx:120,c:x.v>=x.t?x.c:G.neg})
-          ))
-        ),
-        el("div",{style:{background:"white",border:`1px solid ${G.bdr}`,borderRadius:14,padding:"14px 16px",boxShadow:G.shd}},
-          el("div",{style:{fontSize:12,fontWeight:700,color:G.goldD,marginBottom:10}},ar?"مزيج الإيرادات":"Revenue Mix"),
-          el("div",{style:{display:"flex",alignItems:"center",gap:12}},
-            el(Donut,{data:[K.rev||1,K.otInc||0.01],colors:[G.inf,G.gold],size:70}),
-            el("div",{style:{flex:1}},
-              [{l:ar?"تشغيلي":"Operational",v:K.rev,c:G.inf},{l:ar?"أخرى":"Other",v:K.otInc,c:G.gold}]
-              .map(({l,v,c},i)=>el("div",{key:i,style:{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:`1px solid ${G.bdrS}`}},
-                el("div",{style:{display:"flex",alignItems:"center",gap:5}},el("div",{style:{width:8,height:8,borderRadius:2,background:c}}),el("span",{style:{fontSize:10,color:G.txtD}},l)),
-                el("span",{style:{fontSize:11,fontWeight:700,color:c}},`${fmt(v*R)} ${SY}`)
-              ))
-            )
-          )
-        )
-      )
-    )
-  );
-
-  // ══ REVENUE ══════════════════════════════════════════════
-  const PRevenue=()=>{const maxC=Math.max(...K.topC.map(c=>c.amt),1);return el("div",{style:{animation:"fadeIn .4s"}},
-    el(ExpBtn,{isAr:ar,onP:()=>window.print(),onE:doExcel,onPdf:()=>window.print()}),
-    el("div",{style:{display:"grid",gridTemplateColumns:mob?"1fr 1fr":"repeat(3,1fr)",gap:12,marginBottom:14}},
-      el(KpiCard,{label:ar?"إيراد تشغيلي":"Op. Revenue",val:`${fmt(K.rev*R)} ${SY}`,sub:`${K.invCnt} ${ar?"فاتورة":"inv"}`,c:G.inf}),
-      el(KpiCard,{label:ar?"إيرادات أخرى":"Other Income",val:`${fmt(K.otInc*R)} ${SY}`,sub:ar?"فوائد+استثمارات":"Interest+Inv",c:G.gold}),
-      el(KpiCard,{label:ar?"إجمالي الإيرادات":"Total Revenue",val:`${fmt(K.totRev*R)} ${SY}`,c:G.pur})
-    ),
-    el("div",{style:{background:"white",border:`1px solid ${G.bdr}`,borderRadius:14,padding:"16px 18px",boxShadow:G.shd,marginBottom:14}},
-      el("div",{style:{fontSize:13,fontWeight:700,color:G.goldD,marginBottom:12}},ar?"📊 الإيراد الشهري":"📊 Monthly Revenue"),
-      el(BarChart,{data:K.mRev,labels:months,color:G.inf,h:mob?80:110})
-    ),
-    el("div",{style:{display:"grid",gridTemplateColumns:mob?"1fr":"2fr 1fr",gap:14}},
-      el("div",{style:{background:"white",border:`1px solid ${G.bdr}`,borderRadius:14,padding:"16px 18px",boxShadow:G.shd}},
-        el("div",{style:{fontSize:13,fontWeight:700,color:G.goldD,marginBottom:14}},ar?"🏆 أعلى العملاء إيراداً":"🏆 Top Clients"),
-        K.topC.length===0?el(Empty,{isAr:ar,msg:ar?"لا توجد فواتير":"No invoices"}):
-        K.topC.map((c,i)=>el("div",{key:i,style:{marginBottom:11}},
-          el("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:3}},
-            el("div",{style:{display:"flex",alignItems:"center",gap:8}},
-              el("div",{style:{width:22,height:22,borderRadius:6,background:i===0?G.gold:G.sur2,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:800,color:i===0?"white":G.txtF}},i+1),
-              el("span",{style:{fontSize:12,fontWeight:600,color:G.txt}},c.name)
-            ),
-            el("div",{style:{textAlign:"center"}},el("div",{style:{fontSize:11,fontWeight:800,color:G.inf}},`${fmt(c.amt*R)} ${SY}`),el("div",{style:{fontSize:9,color:G.txtF}},`${fmtD(c.pct)}%`))
-          ),
-          el(Hbar,{v:c.amt,mx:maxC,c:i===0?G.gold:G.inf,h:5})
-        ))
-      ),
-      el("div",{style:{background:"white",border:`1px solid ${G.bdr}`,borderRadius:14,padding:"16px 18px",boxShadow:G.shd}},
-        el("div",{style:{fontSize:13,fontWeight:700,color:G.goldD,marginBottom:14}},ar?"💡 الإيرادات الأخرى":"💡 Other Income"),
-        fd.inc.length===0?el(Empty,{isAr:ar,msg:ar?"لا توجد إيرادات أخرى":"No other income"}):
-        el("div",null,
-          fd.inc.map((inc,i)=>el("div",{key:i,style:{padding:"8px 0",borderBottom:`1px solid ${G.bdrS}`,display:"flex",justifyContent:"space-between"}},
-            el("div",null,el("div",{style:{fontSize:11,fontWeight:600,color:G.txt}},ar?inc.category:inc.categoryEn),el("div",{style:{fontSize:9,color:G.txtF}},inc.date)),
-            el("div",{style:{fontSize:12,fontWeight:800,color:G.gold}},`${fmt(inc.amount*R)} ${SY}`)
-          )),
-          el("div",{style:{padding:"8px 0",display:"flex",justifyContent:"space-between",borderTop:`2px solid ${G.bdr}`,marginTop:4}},
-            el("span",{style:{fontSize:12,fontWeight:700,color:G.goldD}},ar?"الإجمالي":"Total"),
-            el("span",{style:{fontSize:13,fontWeight:800,color:G.gold}},`${fmt(K.otInc*R)} ${SY}`)
-          )
-        )
-      )
-    )
-  );};
-
-  // ══ EXPENSES ═════════════════════════════════════════════
-  const PExpenses=()=>{const cats=Object.entries(K.expCat).sort((a,b)=>b[1]-a[1]);const maxC=cats.length>0?Math.max(...cats.map(c=>c[1])):1;return el("div",{style:{animation:"fadeIn .4s"}},
-    el(ExpBtn,{isAr:ar,onP:()=>window.print(),onE:doExcel,onPdf:()=>window.print()}),
-    el("div",{style:{display:"grid",gridTemplateColumns:mob?"1fr 1fr":"repeat(3,1fr)",gap:12,marginBottom:14}},
-      el(KpiCard,{label:ar?"إجمالي المصروفات":"Total Expenses",val:`${fmt(K.exp*R)} ${SY}`,c:G.neg,icon:"📊"}),
-      el(KpiCard,{label:ar?"مصروفات تشغيلية":"Operating",val:`${fmt(K.opExp*R)} ${SY}`,sub:`${K.exp>0?fmtD(K.opExp/K.exp*100):0}%`,c:G.wrn,icon:"⚙️"}),
-      el(KpiCard,{label:ar?"مصروفات عمومية":"G&A",val:`${fmt(K.gaExp*R)} ${SY}`,sub:`${K.exp>0?fmtD(K.gaExp/K.exp*100):0}%`,c:G.inf,icon:"🏢"})
-    ),
-    el("div",{style:{display:"grid",gridTemplateColumns:mob?"1fr":"2fr 1fr",gap:14}},
-      el("div",{style:{background:"white",border:`1px solid ${G.bdr}`,borderRadius:14,padding:"16px 18px",boxShadow:G.shd}},
-        el("div",{style:{fontSize:13,fontWeight:700,color:G.goldD,marginBottom:14}},ar?"📊 تفصيل المصروفات":"📊 Expense Breakdown"),
-        cats.length===0?el(Empty,{isAr:ar,msg:ar?"لا توجد مصروفات":"No expenses"}):
-        cats.map(([cat,amt],i)=>el("div",{key:i,style:{marginBottom:12}},
-          el("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:4}},
-            el("div",{style:{display:"flex",alignItems:"center",gap:8}},el("div",{style:{width:10,height:10,borderRadius:3,background:COLORS[i%COLORS.length]}}),el("span",{style:{fontSize:11,fontWeight:600,color:G.txt}},cat)),
-            el("div",null,el("span",{style:{fontSize:11,fontWeight:700,color:COLORS[i%COLORS.length]}},`${fmt(amt*R)} ${SY}`),el("span",{style:{fontSize:9,color:G.txtF,marginRight:6,marginLeft:6}},`(${fmtD(K.exp>0?amt/K.exp*100:0)}%)`))
-          ),
-          el(Hbar,{v:amt,mx:maxC,c:COLORS[i%COLORS.length]})
-        )),
-        el("div",{style:{padding:"10px 0",borderTop:`2px solid ${G.bdr}`,marginTop:8,display:"flex",justifyContent:"space-between"}},
-          el("span",{style:{fontSize:12,fontWeight:700,color:G.txtD}},ar?"الإجمالي":"Total"),el("span",{style:{fontSize:13,fontWeight:900,color:G.neg}},`${fmt(K.exp*R)} ${SY}`))
-      ),
-      el("div",{style:{display:"flex",flexDirection:"column",gap:12}},
-        el("div",{style:{background:"white",border:`1px solid ${G.bdr}`,borderRadius:14,padding:"14px 16px",boxShadow:G.shd}},
-          el("div",{style:{fontSize:12,fontWeight:700,color:G.goldD,marginBottom:10}},ar?"توزيع المصروفات":"Expense Mix"),
-          el("div",{style:{display:"flex",alignItems:"center",gap:12}},
-            el(Donut,{data:[K.opExp||1,K.gaExp||0.01],colors:[G.wrn,G.inf],size:70}),
-            el("div",{style:{flex:1}},
-              [{l:ar?"تشغيلية":"Operating",v:K.opExp,c:G.wrn},{l:ar?"عمومية":"G&A",v:K.gaExp,c:G.inf}]
-              .map(({l,v,c},i)=>el("div",{key:i,style:{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:`1px solid ${G.bdrS}`}},
-                el("div",{style:{display:"flex",alignItems:"center",gap:5}},el("div",{style:{width:8,height:8,borderRadius:2,background:c}}),el("span",{style:{fontSize:10,color:G.txtD}},l)),
-                el("span",{style:{fontSize:11,fontWeight:700,color:c}},`${fmt(v*R)} ${SY}`)
-              ))
-            )
-          )
-        ),
-        el("div",{style:{background:"white",border:`1px solid ${G.bdr}`,borderRadius:14,padding:"14px 16px",boxShadow:G.shd}},
-          el("div",{style:{fontSize:12,fontWeight:700,color:G.goldD,marginBottom:8}},ar?"معدل الحرق الشهري":"Monthly Burn Rate"),
-          el("div",{style:{fontSize:22,fontWeight:900,color:G.neg}},`${fmt(K.burn*R)} ${SY}`),
-          el("div",{style:{fontSize:10,color:G.txtF,marginTop:4}},ar?"متوسط شهري":"Monthly avg"),
-          el("div",{style:{marginTop:10,padding:"8px 10px",background:G.neg+"08",borderRadius:8,fontSize:10,color:G.neg,fontWeight:700}},
-            ar?`Cash Runway: ${fmtD(K.runway,1)} أشهر`:`Cash Runway: ${fmtD(K.runway,1)} months`)
-        )
-      )
-    )
-  );};
-
-  // ══ LIQUIDITY ════════════════════════════════════════════
-  const PLiq=()=>{const agLbls=ar?["1-30 يوم","31-60 يوم","61-90 يوم","90+ يوم"]:["1-30d","31-60d","61-90d","90+d"];const agColors=[G.wrn,G.neg+"CC",G.neg,"#8B0000"];return el("div",{style:{animation:"fadeIn .4s"}},
-    el(ExpBtn,{isAr:ar,onP:()=>window.print(),onE:doExcel,onPdf:()=>window.print()}),
-    el("div",{style:{display:"grid",gridTemplateColumns:mob?"1fr 1fr":"repeat(4,1fr)",gap:12,marginBottom:14}},
-      el(KpiCard,{label:"DSO",val:`${fmtD(K.dso,0)} ${ar?"يوم":"d"}`,sub:ar?`الهدف: ${targets.dso}d`:`Target: ${targets.dso}d`,c:K.dso<=targets.dso?G.pos:G.neg,badge:K.dso<=targets.dso?"✅":"⚠️"}),
-      el(KpiCard,{label:"DPO",val:`${fmtD(K.dpo,0)} ${ar?"يوم":"d"}`,sub:ar?"كلما زاد أفضل":"Higher=better",c:K.dpo>=30?G.pos:G.wrn}),
-      el(KpiCard,{label:"CCC",val:`${fmtD(K.ccc,0)} ${ar?"يوم":"d"}`,sub:ar?"كلما قل أفضل":"Lower=better",c:K.ccc<30?G.pos:K.ccc<60?G.wrn:G.neg}),
-      el(KpiCard,{label:ar?"نسبة التحصيل":"Collection",val:`${fmtD(K.coll)}%`,sub:ar?`الهدف: ${targets.collectionRate}%`:`Target: ${targets.collectionRate}%`,c:K.coll>=targets.collectionRate?G.pos:G.neg})
-    ),
-    el("div",{style:{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:14,marginBottom:14}},
-      el("div",{style:{background:"white",border:`1px solid ${G.bdr}`,borderRadius:14,padding:"16px 18px",boxShadow:G.shd}},
-        el("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:14,flexWrap:"wrap",gap:8}},
-          el("div",{style:{fontSize:13,fontWeight:700,color:G.goldD}},"◆ "+(ar?"تقادم الذمم المدينة":"AR Aging")),
-          el("div",{style:{fontSize:12,fontWeight:800,color:G.inf}},`${fmt(K.arBal*R)} ${SY}`)
-        ),
-        K.arAg.map((v,i)=>el("div",{key:i,style:{marginBottom:10}},
-          el("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:3}},
-            el("span",{style:{fontSize:11,fontWeight:600,color:G.txt}},agLbls[i]),
-            el("span",{style:{fontSize:11,fontWeight:700,color:agColors[i]}},`${fmt(v*R)} ${SY}`)
-          ),
-          el(Hbar,{v,mx:K.arBal||1,c:agColors[i],h:8})
-        )),
-        el("div",{style:{padding:"8px 12px",background:G.inf+"08",borderRadius:8,marginTop:6,display:"flex",justifyContent:"space-between"}},
-          el("span",{style:{fontSize:11,fontWeight:700,color:G.inf}},ar?"إجمالي AR":"Total AR"),
-          el("span",{style:{fontSize:12,fontWeight:800,color:G.inf}},`${fmt(K.arBal*R)} ${SY}`)
-        )
-      ),
-      el("div",{style:{background:"white",border:`1px solid ${G.bdr}`,borderRadius:14,padding:"16px 18px",boxShadow:G.shd}},
-        el("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:14,flexWrap:"wrap",gap:8}},
-          el("div",{style:{fontSize:13,fontWeight:700,color:G.goldD}},"◎ "+(ar?"تقادم الذمم الدائنة":"AP Aging")),
-          el("div",{style:{fontSize:12,fontWeight:800,color:G.wrn}},`${fmt(K.apBal*R)} ${SY}`)
-        ),
-        K.apAg.map((v,i)=>el("div",{key:i,style:{marginBottom:10}},
-          el("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:3}},
-            el("span",{style:{fontSize:11,fontWeight:600,color:G.txt}},agLbls[i]),
-            el("span",{style:{fontSize:11,fontWeight:700,color:agColors[i]}},`${fmt(v*R)} ${SY}`)
-          ),
-          el(Hbar,{v,mx:K.apBal||1,c:agColors[i],h:8})
-        )),
-        el("div",{style:{padding:"8px 12px",background:G.wrn+"08",borderRadius:8,marginTop:6,display:"flex",justifyContent:"space-between"}},
-          el("span",{style:{fontSize:11,fontWeight:700,color:G.wrn}},ar?"إجمالي AP":"Total AP"),
-          el("span",{style:{fontSize:12,fontWeight:800,color:G.wrn}},`${fmt(K.apBal*R)} ${SY}`)
-        )
-      )
-    ),
-    el("div",{style:{background:"white",border:`1px solid ${G.bdr}`,borderRadius:14,padding:"16px 18px",boxShadow:G.shd}},
-      el("div",{style:{fontSize:13,fontWeight:700,color:G.goldD,marginBottom:12}},ar?"تفصيل العملاء — الذمم المدينة":"Client AR Detail"),
-      data.clients.length===0?el(Empty,{isAr:ar,msg:ar?"لا يوجد عملاء":"No clients"}):
-      el("div",{style:{overflowX:"auto"}},
-        el("table",{style:{width:"100%",borderCollapse:"collapse",minWidth:380}},
-          el("thead",null,el("tr",null,[ar?"العميل":"Client",ar?"الرصيد":"Balance",ar?"متأخر":"Overdue",ar?"أيام":"Days",ar?"الحالة":"Status"].map(h=>el("th",{key:h,style:{textAlign:ar?"right":"left",padding:"7px 10px",fontSize:10,color:G.txtF,borderBottom:`2px solid ${G.bdr}`,fontWeight:700}},h)))),
-          el("tbody",null,data.clients.map((c,i)=>el("tr",{key:i,style:{background:i%2===0?G.sur:"white"}},
-            el("td",{style:{padding:"8px 10px",fontSize:11,fontWeight:700,color:G.txt,borderBottom:`1px solid ${G.bdrS}`}},ar?c.name:c.nameEn),
-            el("td",{style:{padding:"8px 10px",fontSize:11,fontWeight:700,color:G.inf,borderBottom:`1px solid ${G.bdrS}`}},`${fmt(c.balance*R)} ${SY}`),
-            el("td",{style:{padding:"8px 10px",fontSize:11,fontWeight:700,color:c.overdue>0?G.neg:G.pos,borderBottom:`1px solid ${G.bdrS}`}},`${fmt(c.overdue*R)} ${SY}`),
-            el("td",{style:{padding:"8px 10px",borderBottom:`1px solid ${G.bdrS}`}},c.days>0&&el(Bdg,{t:`${c.days}d`,c:c.days>60?G.neg:c.days>30?G.wrn:G.pos,sm:true})),
-            el("td",{style:{padding:"8px 10px",borderBottom:`1px solid ${G.bdrS}`}},el(Bdg,{t:c.overdue>0?(ar?"متأخر":"Overdue"):(ar?"طبيعي":"Current"),c:c.overdue>0?G.neg:G.pos,sm:true}))
-          )))
-        )
-      )
-    )
-  );};
-
-  // ══ BANKS ════════════════════════════════════════════════
-  const PBanks=()=>{const totalEGP=data.treasuries.reduce((s,t)=>s+(t.currency==="EGP"?t.balance:t.balance*50),0);const banks=data.treasuries.filter(t=>t.type==="bank");const cashT=data.treasuries.filter(t=>t.type!=="bank");return el("div",{style:{animation:"fadeIn .4s"}},
-    el(ExpBtn,{isAr:ar,onP:()=>window.print(),onE:doExcel,onPdf:()=>window.print()}),
-    el("div",{style:{background:`linear-gradient(135deg,${G.pos},#145214)`,borderRadius:14,padding:"16px 20px",marginBottom:16,color:"white",boxShadow:`0 4px 16px ${G.pos}50`}},
-      el("div",{style:{fontSize:10,opacity:.85,marginBottom:4}},ar?"إجمالي السيولة (البنوك + الخزائن)":"Total Liquidity"),
-      el("div",{style:{fontSize:mob?24:32,fontWeight:900}},`${fmt(totalEGP*R)} ${SY}`),
-      el("div",{style:{display:"flex",gap:20,marginTop:10,flexWrap:"wrap"}},
-        [{l:ar?"بنوك":"Banks",v:banks.reduce((s,t)=>s+(t.currency==="EGP"?t.balance:t.balance*50),0)},{l:ar?"خزائن نقدية":"Cash",v:cashT.reduce((s,t)=>s+(t.currency==="EGP"?t.balance:t.balance*50),0)}]
-        .map(({l,v},i)=>el("div",{key:i},el("div",{style:{fontSize:9,opacity:.8}},l),el("div",{style:{fontSize:16,fontWeight:800}},`${fmt(v*R)} ${SY}`)))
-      )
-    ),
-    data.treasuries.length===0?el(Empty,{isAr:ar,msg:ar?"لا توجد خزائن":"No treasuries"}):
-    el("div",null,
-      el("div",{style:{display:"grid",gridTemplateColumns:mob?"1fr":"repeat(2,1fr)",gap:14,marginBottom:14}},
-        data.treasuries.map((t,i)=>{const egpV=t.currency==="EGP"?t.balance:t.balance*50;const pct=totalEGP>0?(egpV/totalEGP)*100:0;return el("div",{key:i,style:{background:"white",border:`1px solid ${G.bdr}`,borderTop:`3px solid ${COLORS[i%COLORS.length]}`,borderRadius:14,padding:"16px 18px",boxShadow:G.shd}},
-          el("div",{style:{display:"flex",alignItems:"center",gap:12,marginBottom:12}},
-            el("span",{style:{fontSize:28}},t.type==="bank"?"🏦":"💵"),
-            el("div",null,el("div",{style:{fontSize:13,fontWeight:700,color:G.txt}},ar?t.name:t.nameEn),el("div",{style:{fontSize:10,color:G.txtF}},t.type==="bank"?(ar?"حساب بنكي":"Bank"):(ar?"خزينة نقدية":"Cash"))),
-            el(Bdg,{t:t.currency,c:COLORS[i%COLORS.length],sm:true})
-          ),
-          el("div",{style:{fontSize:24,fontWeight:900,color:COLORS[i%COLORS.length],marginBottom:6}},`${new Intl.NumberFormat("ar-EG").format(Math.round(t.balance))} ${t.currency}`),
-          t.currency!=="EGP"&&el("div",{style:{fontSize:10,color:G.txtF,marginBottom:8}},`≈ ${fmt(egpV*R)} ${SY}`),
-          el("div",{style:{display:"flex",alignItems:"center",gap:8,marginBottom:4}},el(Hbar,{v:pct,mx:100,c:COLORS[i%COLORS.length],h:8}),el("span",{style:{fontSize:10,fontWeight:700,color:COLORS[i%COLORS.length],flexShrink:0}},`${fmtD(pct)}%`))
-        );})
-      ),
-      el("div",{style:{background:"white",border:`1px solid ${G.bdr}`,borderRadius:14,padding:"16px 18px",boxShadow:G.shd}},
-        el("div",{style:{fontSize:13,fontWeight:700,color:G.goldD,marginBottom:14}},ar?"📊 توزيع السيولة":"📊 Liquidity Distribution"),
-        el("div",{style:{display:"flex",alignItems:"center",gap:20,flexWrap:"wrap"}},
-          el(Donut,{data:data.treasuries.map(t=>t.currency==="EGP"?t.balance:t.balance*50),colors:COLORS,size:100}),
-          el("div",{style:{flex:1}},
-            data.treasuries.map((t,i)=>{const egpV=t.currency==="EGP"?t.balance:t.balance*50;const pct=totalEGP>0?(egpV/totalEGP)*100:0;return el("div",{key:i,style:{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${G.bdrS}`,alignItems:"center"}},
-              el("div",{style:{display:"flex",alignItems:"center",gap:8}},el("div",{style:{width:10,height:10,borderRadius:3,background:COLORS[i%COLORS.length]}}),el("span",{style:{fontSize:11,color:G.txt}},ar?t.name:t.nameEn)),
-              el("div",{style:{textAlign:"center"}},el("div",{style:{fontSize:11,fontWeight:700,color:COLORS[i%COLORS.length]}},`${fmtD(pct)}%`),el("div",{style:{fontSize:9,color:G.txtF}},`${fmt(egpV*R)} ${SY}`))
-            );})
-          )
-        )
-      )
-    )
-  );};
-
-  // ══ ALERTS ═══════════════════════════════════════════════
-  const PAlerts=()=>{const lc=l=>l==="critical"?G.neg:l==="warn"?G.wrn:G.pos;const ll=l=>l==="critical"?(ar?"عاجل":"Critical"):l==="warn"?(ar?"تحذير":"Warning"):(ar?"طبيعي":"OK");return el("div",{style:{animation:"fadeIn .4s"}},
-    el("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:20}},
-      [{l:ar?"عاجل":"Critical",v:critA.length,c:G.neg,ic:"🚨"},{l:ar?"تحذير":"Warning",v:warnA.length,c:G.wrn,ic:"⚠️"},{l:ar?"طبيعي":"Normal",v:okA.length,c:G.pos,ic:"✅"}]
-      .map((x,i)=>el("div",{key:i,style:{background:"white",border:`1px solid ${G.bdr}`,borderTop:`3px solid ${x.c}`,borderRadius:14,padding:"14px",textAlign:"center",boxShadow:G.shd}},
-        el("div",{style:{fontSize:28,marginBottom:4}},x.ic),el("div",{style:{fontSize:32,fontWeight:900,color:x.c}},x.v),el("div",{style:{fontSize:11,color:G.txtF}},x.l)))
-    ),
-    [{items:critA,label:ar?"🚨 تنبيهات عاجلة":"🚨 Critical Alerts",border:G.neg},
-     {items:warnA,label:ar?"⚠️ تحذيرات":"⚠️ Warnings",border:G.wrn},
-     {items:okA,  label:ar?"✅ مؤشرات طبيعية":"✅ Normal",border:G.pos}]
-    .filter(s=>s.items.length>0).map((sec,si)=>el("div",{key:si,style:{background:"white",border:`1px solid ${G.bdr}`,borderRadius:14,padding:"16px 18px",boxShadow:G.shd,marginBottom:14}},
-      el("div",{style:{fontSize:13,fontWeight:700,color:G.goldD,marginBottom:14,paddingBottom:10,borderBottom:`2px solid ${sec.border}`}},sec.label),
-      sec.items.map((a,i)=>{const c=lc(a.level);return el("div",{key:i,style:{display:"flex",alignItems:"flex-start",gap:12,padding:"12px 14px",borderRadius:10,background:c+"08",border:`1px solid ${c}20`,marginBottom:10}},
-        el("span",{style:{fontSize:22,flexShrink:0}},a.icon),
-        el("div",{style:{flex:1}},
-          el("div",{style:{display:"flex",alignItems:"center",gap:8,marginBottom:4,flexWrap:"wrap"}},el(Bdg,{t:a.cat,c:G.inf,sm:true}),el(Bdg,{t:ll(a.level),c,sm:true})),
-          el("div",{style:{fontSize:13,fontWeight:700,color:G.txt,marginBottom:4}},a.title),
-          el("div",{style:{fontSize:11,color:c,fontWeight:600}},`→ ${a.action}`)
-        )
-      );})
-    ))
-  );};
-
-  // ══ BOARD ════════════════════════════════════════════════
-  const PBoard=()=>el("div",{style:{animation:"fadeIn .4s"}},
-    el(ExpBtn,{isAr:ar,onP:()=>window.print(),onE:doExcel,onPdf:()=>window.print()}),
-    el("div",{style:{background:"white",border:`1px solid ${G.bdr}`,borderRadius:14,padding:"20px 24px",boxShadow:G.shd}},
-      el("div",{style:{textAlign:"center",marginBottom:20,paddingBottom:16,borderBottom:`2px solid ${G.gold}`}},
-        el("div",{style:{display:"flex",justifyContent:"center",marginBottom:10}},el(Logo,{size:36}),el("div",{style:{marginRight:ar?10:0,marginLeft:!ar?10:0,textAlign:ar?"right":"left"}},el("div",{style:{fontSize:15,fontWeight:900,color:G.goldD,fontFamily:"Georgia,serif"}},"CLink·"),el("div",{style:{fontSize:8,color:G.gold,letterSpacing:2}},"CFO v5"))),
-        el("div",{style:{fontSize:10,color:G.txtF,letterSpacing:2,marginBottom:4}},"BOARD OF DIRECTORS REPORT"),
-        el("div",{style:{fontSize:18,fontWeight:900,color:G.goldD,fontFamily:"Georgia,serif"}},ar?"تقرير مجلس الإدارة المالي":"Financial Board Report"),
-        el("div",{style:{fontSize:11,color:G.txtF,marginTop:4}},`${period} | FY 2025 | ${SY}`)
-      ),
-      el("div",{style:{display:"grid",gridTemplateColumns:mob?"1fr 1fr":"repeat(4,1fr)",gap:12,marginBottom:20}},
-        [{l:ar?"الإيرادات":"Revenue",v:`${fmt(K.totRev*R)} ${SY}`,s:`GM:${fmtD(K.gm)}%`,c:G.inf},{l:"EBIT",v:`${fmt(K.ebit*R)} ${SY}`,s:`${fmtD(K.ebitM)}%`,c:G.gold},{l:ar?"صافي الربح":"Net",v:`${fmt(K.np*R)} ${SY}`,s:`NM:${fmtD(K.nm)}%`,c:G.pos},{l:"Cash Runway",v:`${fmtD(K.runway,1)}mo`,s:`${fmt(K.cash*R)} ${SY}`,c:K.runway>=targets.cashRunway?G.inf:G.neg}]
-        .map((x,i)=>el("div",{key:i,style:{padding:"12px",borderRadius:10,background:x.c+"10",border:`1px solid ${x.c}20`,textAlign:"center"}},
-          el("div",{style:{fontSize:9,color:G.txtF,fontWeight:600,marginBottom:3}},x.l),
-          el("div",{style:{fontSize:mob?16:20,fontWeight:900,color:x.c}},x.v),
-          el("div",{style:{fontSize:9,color:x.c,fontWeight:700,marginTop:2}},x.s)
-        ))
-      ),
-      el("div",{style:{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:14,marginBottom:16}},
-        el("div",null,
-          el("div",{style:{fontSize:12,fontWeight:700,color:G.pos,marginBottom:10}},ar?"🟢 نقاط القوة":"🟢 Strengths"),
-          [ar?`هامش إجمالي ${fmtD(K.gm)}% — ${K.gm>=targets.grossMargin?"فوق":"دون"} الهدف`:`Gross margin ${fmtD(K.gm)}% — ${K.gm>=targets.grossMargin?"above":"below"} target`,
-           ar?`نسبة التحصيل ${fmtD(K.coll)}%`:`Collection rate ${fmtD(K.coll)}%`,
-           ar?`Cash Runway ${fmtD(K.runway,1)} أشهر`:`Cash Runway ${fmtD(K.runway,1)} months`]
-          .map((t,i)=>el("div",{key:i,style:{display:"flex",gap:8,padding:"5px 0",borderBottom:`1px solid ${G.bdrS}`}},el("span",{style:{color:G.pos,fontWeight:800}},"✓"),el("span",{style:{fontSize:11,color:G.txtD}},t)))
-        ),
-        el("div",null,
-          el("div",{style:{fontSize:12,fontWeight:700,color:G.wrn,marginBottom:10}},ar?"⚠️ نقاط المتابعة":"⚠️ Watch Points"),
-          [ar?`DSO ${fmtD(K.dso,0)} يوم — الهدف ${targets.dso}d`:`DSO ${fmtD(K.dso,0)}d — target ${targets.dso}d`,
-           ar?`الذمم المتأخرة: ${fmt(K.ovAR*R)} ${SY}`:`Overdue AR: ${fmt(K.ovAR*R)} ${SY}`,
-           ar?`CCC: ${fmtD(K.ccc,0)} يوم`:`CCC: ${fmtD(K.ccc,0)}d`]
-          .map((t,i)=>el("div",{key:i,style:{display:"flex",gap:8,padding:"5px 0",borderBottom:`1px solid ${G.bdrS}`}},el("span",{style:{color:G.wrn,fontWeight:800}},"⚠"),el("span",{style:{fontSize:11,color:G.txtD}},t)))
-        )
-      ),
-      el("div",{style:{background:G.sur2,borderRadius:10,padding:"14px 16px"}},
-        el("div",{style:{fontSize:12,fontWeight:700,color:G.goldD,marginBottom:12}},ar?"المؤشرات مقابل الأهداف":"KPIs vs Targets"),
-        el("div",{style:{overflowX:"auto"}},
-          el("table",{style:{width:"100%",borderCollapse:"collapse",minWidth:320}},
-            el("thead",null,el("tr",null,[ar?"المؤشر":"KPI",ar?"الفعلي":"Actual",ar?"الهدف":"Target",ar?"الحالة":"Status"].map(h=>el("th",{key:h,style:{textAlign:ar?"right":"left",padding:"6px 10px",fontSize:10,color:G.txtF,borderBottom:`2px solid ${G.bdr}`,fontWeight:700}},h)))),
-            el("tbody",null,
-              [[ar?"هامش إجمالي":"GM",`${fmtD(K.gm)}%`,`${targets.grossMargin}%`,K.gm>=targets.grossMargin],
-               [ar?"هامش صافي":"NM",`${fmtD(K.nm)}%`,`${targets.netMargin}%`,K.nm>=targets.netMargin],
-               [ar?"تحصيل":"Collection",`${fmtD(K.coll)}%`,`${targets.collectionRate}%`,K.coll>=targets.collectionRate],
-               ["DSO",`${fmtD(K.dso,0)}d`,`${targets.dso}d`,K.dso<=targets.dso],
-               ["Runway",`${fmtD(K.runway,1)}mo`,`${targets.cashRunway}mo`,K.runway>=targets.cashRunway]]
-              .map(([n,v,t,ok],i)=>el("tr",{key:i,style:{background:i%2===0?"white":G.sur}},
-                el("td",{style:{padding:"7px 10px",fontSize:11,fontWeight:700,color:G.txt,borderBottom:`1px solid ${G.bdrS}`}},n),
-                el("td",{style:{padding:"7px 10px",fontSize:11,fontWeight:700,color:ok?G.pos:G.neg,borderBottom:`1px solid ${G.bdrS}`}},v),
-                el("td",{style:{padding:"7px 10px",fontSize:10,color:G.txtF,borderBottom:`1px solid ${G.bdrS}`}},t),
-                el("td",{style:{padding:"7px 10px",borderBottom:`1px solid ${G.bdrS}`}},el(Bdg,{t:ok?"✅ OK":"⚠️ Review",c:ok?G.pos:G.wrn,sm:true}))
-              ))
-            )
-          )
-        )
-      )
-    )
-  );
-
-  // ══ REPORTS ══════════════════════════════════════════════
-  const PReports=()=>el("div",{style:{animation:"fadeIn .4s"}},
-    el("div",{style:{background:"white",border:`1px solid ${G.bdr}`,borderRadius:14,padding:"16px 18px",boxShadow:G.shd,marginBottom:14}},
-      el("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}},
-        el("div",{style:{fontSize:13,fontWeight:700,color:G.goldD,display:"flex",alignItems:"center",gap:8}},
-          "✦ "+(ar?"التقرير المالي الشامل":"Full Financial Report"),
-          el(Bdg,{t:mode==="connected"?(ar?"بيانات حقيقية":"Live"):(ar?"تجريبي":"Demo"),c:mode==="connected"?G.pos:G.wrn})
-        ),
-        el(ExpBtn,{isAr:ar,onP:()=>window.print(),onE:doExcel,onPdf:()=>window.print()})
-      ),
-      el("div",{style:{overflowX:"auto"}},
-        el("table",{style:{width:"100%",borderCollapse:"collapse",minWidth:460}},
-          el("thead",null,el("tr",null,[ar?"المؤشر":"KPI",ar?"القيمة":"Value",ar?"المعيار":"Benchmark",ar?"الحالة":"Status",ar?"الإجراء":"Action"].map(h=>el("th",{key:h,style:{textAlign:ar?"right":"left",padding:"8px 12px",fontSize:11,color:G.txtF,borderBottom:`2px solid ${G.bdr}`,fontWeight:700}},h)))),
-          el("tbody",null,
-            [
-              [ar?"إجمالي الإيرادات":"Total Revenue",`${fmt(K.totRev*R)} ${SY}`,"—",true,"—"],
-              [ar?"الإيراد التشغيلي":"Op. Revenue",`${fmt(K.rev*R)} ${SY}`,"—",true,"—"],
-              [ar?"إجمالي الربح":"Gross Profit",`${fmt(K.gp*R)} ${SY}`,`≥${targets.grossMargin}%`,K.gm>=targets.grossMargin,K.gm>=targets.grossMargin?(ar?"ممتاز":"Excellent"):(ar?"راجع التكاليف":"Review costs")],
-              [ar?"هامش إجمالي":"Gross Margin",`${fmtD(K.gm)}%`,`≥${targets.grossMargin}%`,K.gm>=targets.grossMargin,"—"],
-              ["EBIT",`${fmt(K.ebit*R)} ${SY}`,"≥0",K.ebit>=0,K.ebit>=0?(ar?"إيجابي":"Positive"):(ar?"راجع فوراً":"Urgent")],
-              [ar?"صافي الربح":"Net Profit",`${fmt(K.np*R)} ${SY}`,"≥0",K.np>=0,"—"],
-              [ar?"هامش صافي":"Net Margin",`${fmtD(K.nm)}%`,`≥${targets.netMargin}%`,K.nm>=targets.netMargin,"—"],
-              ["DSO",`${fmtD(K.dso,0)}d`,`≤${targets.dso}d`,K.dso<=targets.dso,K.dso<=targets.dso?(ar?"ضمن الهدف":"On target"):(ar?"تسريع التحصيل":"Accelerate")],
-              ["DPO",`${fmtD(K.dpo,0)}d`,"≥30d",K.dpo>=30,"—"],
-              ["CCC",`${fmtD(K.ccc,0)}d`,"<30d",K.ccc<30,"—"],
-              [ar?"نسبة التحصيل":"Collection",`${fmtD(K.coll)}%`,`≥${targets.collectionRate}%`,K.coll>=targets.collectionRate,"—"],
-              ["Cash Runway",`${fmtD(K.runway,1)}mo`,`≥${targets.cashRunway}mo`,K.runway>=targets.cashRunway,K.runway>=targets.cashRunway?(ar?"مستقر":"Stable"):(ar?"مراجعة السيولة":"Review liquidity")],
-              [ar?"الذمم المدينة":"AR",`${fmt(K.arBal*R)} ${SY}`,"—",true,"—"],
-              [ar?"الذمم الدائنة":"AP",`${fmt(K.apBal*R)} ${SY}`,"—",true,"—"],
-              [ar?"الخزينة والبنوك":"Cash & Banks",`${fmt(K.cash*R)} ${SY}`,"≥0",K.cash>=0,"—"],
-            ].map(([n,v,b,ok,action],i)=>el("tr",{key:i,style:{background:i%2===0?G.sur:"white"}},
-              el("td",{style:{padding:"8px 12px",fontSize:11,fontWeight:700,color:G.txt,borderBottom:`1px solid ${G.bdrS}`}},n),
-              el("td",{style:{padding:"8px 12px",fontSize:11,fontWeight:700,color:G.gold,borderBottom:`1px solid ${G.bdrS}`}},v),
-              el("td",{style:{padding:"8px 12px",fontSize:10,color:G.txtF,borderBottom:`1px solid ${G.bdrS}`}},b),
-              el("td",{style:{padding:"8px 12px",borderBottom:`1px solid ${G.bdrS}`}},el(Bdg,{t:ok?"✅ OK":"⚠️ Review",c:ok?G.pos:G.wrn,sm:true})),
-              el("td",{style:{padding:"8px 12px",fontSize:10,color:G.txtD,borderBottom:`1px solid ${G.bdrS}`}},action)
-            ))
-          )
-        )
-      )
-    ),
-    fetchLog.length>0&&el("div",{style:{background:"white",border:`1px solid ${G.bdr}`,borderRadius:14,padding:"14px 16px",boxShadow:G.shd}},
-      el("div",{style:{fontSize:12,fontWeight:700,color:G.goldD,marginBottom:10}},"📡 "+(ar?"سجل جلب البيانات":"Data Fetch Log")),
-      el("div",{style:{display:"flex",gap:8,flexWrap:"wrap"}},fetchLog.map((l,i)=>el(Bdg,{key:i,t:`${l.ok?"✅":"❌"} ${l.label}: ${l.count}`,c:l.ok?G.pos:G.neg})))
-    )
-  );
-
-  // ══ SETTINGS ═════════════════════════════════════════════
-  const PSettings=()=>el("div",{style:{animation:"fadeIn .4s"}},
-    el("div",{style:{background:"white",border:`1px solid ${G.bdr}`,borderRadius:14,padding:"18px 20px",boxShadow:G.shd,marginBottom:14}},
-      el("div",{style:{fontSize:14,fontWeight:700,color:G.goldD,marginBottom:16}},ar?"⚙️ حالة الاتصال بدفترة":"⚙️ Daftra Connection"),
-      el("div",{style:{display:"flex",alignItems:"center",gap:12,marginBottom:16,padding:"14px 16px",borderRadius:10,background:mode==="connected"?G.pos+"10":G.sur,border:`1px solid ${mode==="connected"?G.pos+"30":G.bdrS}`}},
-        el("div",{style:{width:14,height:14,borderRadius:"50%",background:mode==="connected"?G.pos:G.wrn,flexShrink:0}}),
-        el("div",{style:{flex:1}},
-          el("div",{style:{fontSize:13,fontWeight:700,color:mode==="connected"?G.pos:G.txtD}},mode==="connected"?(ar?"✅ متصل بدفترة بنجاح":"✅ Connected to Daftra"):(ar?"🔷 غير متصل":"🔷 Not connected")),
-          mode==="connected"&&el("div",{style:{fontSize:10,color:G.txtF,marginTop:3}},`${subdomain||"—"} | ${ar?"آخر تحديث:":"Last sync:"} ${lastSync?.toLocaleTimeString(ar?"ar-EG":"en")||"—"}`)
-        ),
-        mode==="connected"&&el("button",{onClick:disconnect,style:{padding:"6px 14px",borderRadius:8,border:`1px solid ${G.neg}40`,background:G.neg+"10",color:G.neg,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}},ar?"⏏ قطع":"⏏ Disconnect")
-      ),
-      mode!=="connected"&&el("div",{style:{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:12}},
-        el("div",{style:{padding:"16px",borderRadius:10,border:`2px solid ${G.gold}`,background:G.goldL,cursor:"pointer"},onClick:()=>setShowApi(true)},
-          el("div",{style:{fontSize:13,fontWeight:800,color:G.goldD,marginBottom:4}},"🔑 API Key"),
-          el("div",{style:{fontSize:11,color:G.txtD,lineHeight:1.6,marginBottom:10}},ar?"إدخال API Key من إعدادات دفترة — يعمل فوراً":"Enter API Key — works immediately"),
-          el("button",{onClick:()=>setShowApi(true),style:{padding:"7px 16px",borderRadius:7,border:"none",background:G.gold,color:"white",fontSize:11,fontWeight:800,cursor:"pointer",fontFamily:"inherit"}},ar?"اتصال":"Connect")
-        ),
-        el("div",{style:{padding:"16px",borderRadius:10,border:`1px solid ${G.bdr}`,background:G.sur},onClick:loginOAuth},
-          el("div",{style:{fontSize:13,fontWeight:800,color:G.goldD,marginBottom:4}},"🔗 OAuth 2.0"),
-          el("div",{style:{fontSize:11,color:G.txtD,lineHeight:1.6,marginBottom:4}},ar?"تسجيل دخول رسمي بدفترة":"Official Daftra login"),
-          el("div",{style:{fontSize:9,color:G.wrn,marginBottom:10}},ar?"⚠ التطبيق قيد المراجعة":"⚠ App under review"),
-          el("button",{onClick:loginOAuth,style:{padding:"7px 16px",borderRadius:7,border:`1px solid ${G.gold}`,background:"white",color:G.goldD,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}},ar?"تسجيل دخول":"OAuth Login")
-        )
-      )
-    ),
-    el("div",{style:{background:"white",border:`1px solid ${G.bdr}`,borderRadius:14,padding:"18px 20px",boxShadow:G.shd,marginBottom:14}},
-      el("div",{style:{fontSize:14,fontWeight:700,color:G.goldD,marginBottom:14}},ar?"🔄 التحديث التلقائي":"🔄 Auto Refresh"),
-      el("div",{style:{display:"flex",gap:10,flexWrap:"wrap"}},
-        [{v:0,l:ar?"يدوي":"Manual"},{v:5,l:"5m"},{v:15,l:"15m"},{v:30,l:"30m"},{v:60,l:"1h"}]
-        .map(opt=>el("button",{key:opt.v,onClick:()=>setAutoMin(opt.v),style:{padding:"8px 16px",borderRadius:8,border:`1.5px solid ${autoMin===opt.v?G.gold:G.bdr}`,background:autoMin===opt.v?G.gold:"white",color:autoMin===opt.v?"white":G.txtD,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}},opt.l))
-      ),
-      el("div",{style:{fontSize:10,color:G.txtF,marginTop:8}},autoMin===0?(ar?"التحديث يدوي":"Manual only"):(ar?`يتحدث كل ${autoMin} دقيقة`:`Refreshes every ${autoMin} minutes`))
-    ),
-    el("div",{style:{background:"white",border:`1px solid ${G.bdr}`,borderRadius:14,padding:"18px 20px",boxShadow:G.shd,marginBottom:14}},
-      el("div",{style:{fontSize:14,fontWeight:700,color:G.goldD,marginBottom:14}},ar?"🎯 الأهداف المالية":"🎯 Financial Targets"),
-      el("div",{style:{display:"grid",gridTemplateColumns:mob?"1fr":"repeat(2,1fr)",gap:14}},
-        [{k:"grossMargin",l:ar?"هامش الربح الإجمالي":"Gross Margin",u:"%",min:0,max:80},
-         {k:"netMargin",l:ar?"هامش الصافي":"Net Margin",u:"%",min:0,max:50},
-         {k:"collectionRate",l:ar?"نسبة التحصيل":"Collection Rate",u:"%",min:0,max:100},
-         {k:"dso",l:"DSO",u:ar?" يوم":" days",min:10,max:120},
-         {k:"cashRunway",l:"Cash Runway",u:ar?" أشهر":" months",min:1,max:24}]
-        .map(f=>el("div",{key:f.k},
-          el("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:6}},
-            el("label",{style:{fontSize:11,fontWeight:600,color:G.txt}},f.l),
-            el("span",{style:{fontSize:13,fontWeight:800,color:G.gold}},`${targets[f.k]}${f.u}`)
-          ),
-          el("input",{type:"range",min:f.min,max:f.max,value:targets[f.k],onChange:e=>setTargets(p=>({...p,[f.k]:parseInt(e.target.value)})),style:{width:"100%",accentColor:G.gold}})
-        ))
-      )
-    ),
-    el("div",{style:{background:G.sur,border:`1px solid ${G.bdrS}`,borderRadius:14,padding:"14px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12}},
-      el(Logo,{size:32}),
-      el("div",null,el("div",{style:{fontSize:11,fontWeight:700,color:G.goldD}},"CLink· CFO Dashboard v5.0"),el("div",{style:{fontSize:10,color:G.txtF}},"InvestorProHub | 2026")),
-      el("div",{style:{textAlign:"center",padding:"8px 16px",background:"white",borderRadius:10,border:`1px solid ${G.bdr}`}},el("div",{style:{fontSize:10,color:G.txtF}},"Daftra API"),el("div",{style:{fontSize:10,fontWeight:700,color:G.gold,direction:"ltr"}},`${subdomain||"app"}.daftra.com`))
-    )
-  );
-
-  // ══ RENDER ════════════════════════════════════════════════
-  return el("div",{style:{minHeight:"100vh",background:G.bg,color:G.txt,fontFamily:"'Cairo',sans-serif",direction:dir}},
-    mode==="loading"&&el(LoadOv),
-    showApi&&el(ApiMod),
-    !mob&&el(Sidebar),
-    mob&&el(BotNav),
-    el("main",{style:{[ar?"marginRight":"marginLeft"]:SW,minHeight:"100vh"}},
-      el(ConnBar),el(Header),
-      el("div",{style:{padding:mob?"12px 12px 80px":"16px 20px"}},
-        page==="home"    &&el(PHome),
-        page==="pl"      &&el(PPL),
-        page==="revenue" &&el(PRevenue),
-        page==="expenses"&&el(PExpenses),
-        page==="liquidity"&&el(PLiq),
-        page==="banks"   &&el(PBanks),
-        page==="alerts"  &&el(PAlerts),
-        page==="board"   &&el(PBoard),
-        page==="reports" &&el(PReports),
-        page==="settings"&&el(PSettings),
-      ),
-      !mob&&el("div",{className:"np",style:{padding:"8px 20px",borderTop:`1px solid ${G.bdrS}`,display:"flex",justifyContent:"space-between",fontSize:9,color:G.txtF}},
-        el("span",null,`IFRS | ${ar?money.n:money.nE} | FY 2025/2026`),
-        el("span",{style:{color:G.gold,fontWeight:700}},"CLink· CFO v5.0 | InvestorProHub 2026")
-      )
-    ),
-    el(ToastEl)
-  );
-}
-ReactDOM.createRoot(document.getElementById("root")).render(el(App));
-}); // end load event
-</script>
+    ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
+  </script>
 </body>
 </html>
