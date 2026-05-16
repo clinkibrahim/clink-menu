@@ -154,10 +154,13 @@ function App() {
   const [recipeIngRow, setRecipeIngRow] = useState({ingredientId:"", qty:""});
 
   // ── DEBUG STATE ───────────────────────────────────────────
-  const [debugLogs, setDebugLogs]     = useState([]);
-  const [debugLoading, setDebugLoading] = useState({});
-  const [debugRaw, setDebugRaw]       = useState({});
+  const [debugLogs, setDebugLogs]         = useState([]);
+  const [debugLoading, setDebugLoading]   = useState({});
+  const [debugRaw, setDebugRaw]           = useState({});
   const [debugExpanded, setDebugExpanded] = useState({});
+  const [customEp, setCustomEp]           = useState("products.json?limit=5");
+  const [customResult, setCustomResult]   = useState(null);
+  const [customLoading, setCustomLoading] = useState(false);
 
   const ar  = lang === "AR";
   const dir = ar ? "rtl" : "ltr";
@@ -199,6 +202,8 @@ function App() {
 
     const loadProducts = async (token, sub, tokenType) => {
       setAuthLoading(true);
+      // أظهر loading indicator على صفحة الـ dashboard
+      setPage(PAGES.DASHBOARD);
       try {
         let products = null;
         const types = tokenType === "bearer" ? ["bearer","apikey"] : ["apikey","bearer"];
@@ -225,17 +230,18 @@ function App() {
           } catch {}
         }
 
-        // ── مسح البيانات التجريبية دائماً عند الاتصال ──────
-        setIngredients(products && products.length > 0 ? products : []);
-        setRecipes([]);
-        setConnection(c => ({...c, status:"connected", token}));
-
+        // عند الاتصال الحقيقي: استخدم بيانات دفترة إن وجدت، وإلا اترك الـ demo
         if (products && products.length > 0) {
+          setIngredients(products);
+          setRecipes([]); // وصفات الديمو لا تنطبق على منتجات حقيقية
           toast(ar?`✅ تم الاتصال! جُلب ${products.length} منتج من دفترة`:`✅ Connected! ${products.length} products from Daftra`);
         } else {
-          toast(ar?"✅ تم الاتصال بدفترة! لا توجد منتجات — أضفها من دفترة":"✅ Connected! No products found — add them in Daftra");
+          // لا توجد منتجات في دفترة — أبقِ الديمو مرئياً مع رسالة
+          setIngredients(DEMO_ING);
+          setRecipes(DEMO_RECIPES);
+          toast(ar?"⚠ متصل بدفترة — لا توجد منتجات. تعرض البيانات التجريبية":"⚠ Connected — No products in Daftra. Showing demo data","warn");
         }
-        setPage(PAGES.DASHBOARD);
+        setConnection(c => ({...c, status:"connected", token}));
 
       } catch(err) {
         toast(ar?"❌ تعذّر جلب البيانات":"❌ Failed to load data","error");
@@ -510,6 +516,14 @@ function App() {
   // ── DASHBOARD ─────────────────────────────────────────────
   const renderDashboard = () => (
     <>
+      {authLoading && (
+        <div style={{position:"fixed",inset:0,background:"rgba(255,253,247,0.92)",zIndex:300,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}}>
+          <div style={{width:52,height:52,border:`4px solid ${C.borderSoft}`,borderTop:`4px solid ${C.gold}`,borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
+          <div style={{fontSize:15,fontWeight:700,color:C.goldDark}}>{ar?"جاري جلب البيانات من دفترة...":"Loading data from Daftra..."}</div>
+          <div style={{fontSize:11,color:C.textFaint}}>{ar?"يرجى الانتظار":"Please wait"}</div>
+          <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+        </div>
+      )}
       <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(4,1fr)",gap:12,marginBottom:16}}>
         {[
           {label:ar?"متوسط Food Cost":"Avg Food Cost", value:`${avgFC.toFixed(1)}%`, color:getColor(avgFC), sub:getLabel(avgFC,ar)},
@@ -934,6 +948,26 @@ function App() {
 
   const runAllTests = () => debugEndpoints.forEach(e => runDebugTest(e.ep, e.key));
 
+  const runCustom = async () => {
+    const token = connection.token || DaftraAPI.getToken();
+    const sub   = DaftraAPI.getSubdomain() || connection.subdomain;
+    if (!token) { addLog("error","لا يوجد token — اتصل بدفترة أولاً",""); return; }
+    setCustomLoading(true); setCustomResult(null);
+    const started = Date.now();
+    try {
+      const url = `/api/daftra?subdomain=${encodeURIComponent(sub)}&apikey=${encodeURIComponent(token)}&endpoint=${encodeURIComponent(customEp)}`;
+      const res = await fetch(url);
+      const ms  = Date.now() - started;
+      const txt = await res.text();
+      let parsed = null; try { parsed = JSON.parse(txt); } catch { parsed = {_raw:txt}; }
+      setCustomResult({status:res.status, ms, data:parsed});
+      addLog(res.ok?"success":"error", `custom → ${res.status} (${ms}ms)`, customEp);
+    } catch(err) {
+      setCustomResult({status:"ERR", ms:0, data:{error:err.message}});
+      addLog("error","custom → "+err.message, customEp);
+    } finally { setCustomLoading(false); }
+  };
+
   const pingProxy = async () => {
     addLog("info", "→ فحص /api/daftra (proxy health check)", "");
     try {
@@ -1051,60 +1085,32 @@ function App() {
         </div>
 
         {/* ── Custom Endpoint ─────────────────────────────────── */}
-        {(() => {
-          const [customEp, setCustomEp] = useState("products.json?limit=5");
-          const [customResult, setCustomResult] = useState(null);
-          const [customLoading, setCustomLoading] = useState(false);
-
-          const runCustom = async () => {
-            const token = connection.token || DaftraAPI.getToken();
-            const sub   = DaftraAPI.getSubdomain() || connection.subdomain;
-            if (!token) return addLog("error","لا يوجد token","");
-            setCustomLoading(true); setCustomResult(null);
-            const started = Date.now();
-            try {
-              const url = `/api/daftra?subdomain=${encodeURIComponent(sub)}&apikey=${encodeURIComponent(token)}&endpoint=${encodeURIComponent(customEp)}`;
-              const res = await fetch(url);
-              const ms  = Date.now() - started;
-              const txt = await res.text();
-              let parsed = null; try { parsed = JSON.parse(txt); } catch { parsed = {_raw:txt}; }
-              setCustomResult({status:res.status, ms, data:parsed});
-              addLog(res.ok?"success":"error", `custom → ${res.status} (${ms}ms)`, customEp);
-            } catch(err) {
-              setCustomResult({status:"ERR", ms:0, data:{error:err.message}});
-              addLog("error","custom → "+err.message,customEp);
-            } finally { setCustomLoading(false); }
-          };
-
-          return (
-            <div style={{background:C.white,border:`1px solid ${C.border}`,borderRadius:12,padding:"16px 18px",marginBottom:16}}>
-              <div style={{fontSize:12,fontWeight:800,color:C.goldDark,marginBottom:12,letterSpacing:1}}>CUSTOM ENDPOINT</div>
-              <div style={{display:"flex",gap:8,marginBottom:10}}>
-                <input value={customEp} onChange={e=>setCustomEp(e.target.value)} placeholder="products.json?limit=5" style={{flex:1,padding:"8px 12px",border:`1.5px solid ${C.border}`,borderRadius:7,fontFamily:"monospace",fontSize:12,background:C.surface,color:C.text}}/>
-                <button onClick={runCustom} disabled={!isConn||customLoading} style={{padding:"8px 16px",borderRadius:7,border:"none",background:isConn?C.gold:"#ccc",color:"white",fontSize:12,fontWeight:700,cursor:isConn?"pointer":"not-allowed",fontFamily:"monospace"}}>
-                  {customLoading?"⏳":"▶ Run"}
-                </button>
+        <div style={{background:C.white,border:`1px solid ${C.border}`,borderRadius:12,padding:"16px 18px",marginBottom:16}}>
+          <div style={{fontSize:12,fontWeight:800,color:C.goldDark,marginBottom:12,letterSpacing:1}}>CUSTOM ENDPOINT</div>
+          <div style={{display:"flex",gap:8,marginBottom:10}}>
+            <input value={customEp} onChange={e=>setCustomEp(e.target.value)} placeholder="products.json?limit=5" style={{flex:1,padding:"8px 12px",border:`1.5px solid ${C.border}`,borderRadius:7,fontFamily:"monospace",fontSize:12,background:C.surface,color:C.text}}/>
+            <button onClick={runCustom} disabled={!isConn||customLoading} style={{padding:"8px 16px",borderRadius:7,border:"none",background:isConn?C.gold:"#ccc",color:"white",fontSize:12,fontWeight:700,cursor:isConn?"pointer":"not-allowed",fontFamily:"monospace"}}>
+              {customLoading?"⏳":"▶ Run"}
+            </button>
+          </div>
+          <div style={{fontSize:10,color:C.textFaint,marginBottom:10,fontFamily:"monospace"}}>
+            Full URL: /api/daftra?subdomain={sub||"?"}&apikey=***&endpoint=<strong style={{color:C.gold}}>{customEp}</strong>
+          </div>
+          {customResult && (
+            <div style={{borderRadius:8,overflow:"hidden",border:`1px solid ${customResult.status>=200&&customResult.status<300?C.positive:C.negative}`}}>
+              <div style={{padding:"8px 12px",background:customResult.status>=200&&customResult.status<300?"#F0FFF4":"#FFF0EE",display:"flex",gap:12,fontSize:11,fontWeight:700}}>
+                <span style={{color:customResult.status>=200&&customResult.status<300?C.positive:C.negative}}>HTTP {customResult.status}</span>
+                <span style={{color:C.textFaint}}>{customResult.ms}ms</span>
+                <span style={{color:C.textFaint}}>records: {customResult.data?.data?.length??"-"}</span>
               </div>
-              <div style={{fontSize:10,color:C.textFaint,marginBottom:10,fontFamily:"monospace"}}>
-                Full URL: /api/daftra?subdomain={sub||"?"}&apikey=***&endpoint=<strong>{customEp}</strong>
+              <div style={{background:"#0D1117",padding:"10px 14px",maxHeight:220,overflowY:"auto"}}>
+                <pre style={{fontFamily:"monospace",fontSize:10,color:"#7EE787",margin:0,whiteSpace:"pre-wrap",wordBreak:"break-all"}}>
+                  {JSON.stringify(customResult.data,null,2).slice(0,4000)}
+                </pre>
               </div>
-              {customResult && (
-                <div style={{borderRadius:8,overflow:"hidden",border:`1px solid ${customResult.status>=200&&customResult.status<300?C.positive:C.negative}`}}>
-                  <div style={{padding:"8px 12px",background:customResult.status>=200&&customResult.status<300?"#F0FFF4":"#FFF0EE",display:"flex",gap:12,fontSize:11,fontWeight:700}}>
-                    <span style={{color:customResult.status>=200&&customResult.status<300?C.positive:C.negative}}>HTTP {customResult.status}</span>
-                    <span style={{color:C.textFaint}}>{customResult.ms}ms</span>
-                    <span style={{color:C.textFaint}}>records: {customResult.data?.data?.length??"-"}</span>
-                  </div>
-                  <div style={{background:"#0D1117",padding:"10px 14px",maxHeight:220,overflowY:"auto"}}>
-                    <pre style={{fontFamily:"monospace",fontSize:10,color:"#7EE787",margin:0,whiteSpace:"pre-wrap",wordBreak:"break-all"}}>
-                      {JSON.stringify(customResult.data,null,2).slice(0,4000)}
-                    </pre>
-                  </div>
-                </div>
-              )}
             </div>
-          );
-        })()}
+          )}
+        </div>
 
         {/* ── Activity Log ────────────────────────────────────── */}
         <div style={{background:C.white,border:`1px solid ${C.border}`,borderRadius:12,padding:"16px 18px"}}>
