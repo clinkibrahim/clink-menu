@@ -128,7 +128,7 @@ const DEMO_RECIPES = [
   {id:3, name:"برجر لحم بقري",      nameEN:"Beef Burger",            category:"برجر",         catEN:"Burger",       sellingPrice:120, portions:1, ingredients:[{ingredientId:9,qty:0.2},{ingredientId:4,qty:0.05},{ingredientId:5,qty:0.03},{ingredientId:6,qty:0.01}]},
 ];
 
-const PAGES = {SETUP:"setup", DASHBOARD:"dashboard", INGREDIENTS:"ingredients", RECIPES:"recipes", REPORTS:"reports"};
+const PAGES = {SETUP:"setup", DASHBOARD:"dashboard", INGREDIENTS:"ingredients", RECIPES:"recipes", REPORTS:"reports", DEBUG:"debug"};
 
 const getColor = pct => pct <= 28 ? C.positive : pct <= 35 ? C.warning : C.negative;
 const getLabel = (pct, ar) => pct <= 28 ? (ar?"ممتاز":"Excellent") : pct <= 35 ? (ar?"مقبول":"Acceptable") : (ar?"مرتفع":"High");
@@ -152,6 +152,15 @@ function App() {
   const [newIng, setNewIng]   = useState({name:"", nameEN:"", unit:"كجم", unitEN:"kg", price:"", category:"خضروات", catEN:"Vegetables"});
   const [newRecipe, setNewRecipe] = useState({name:"", nameEN:"", category:"أطباق رئيسية", catEN:"Main Dishes", sellingPrice:"", portions:1, ingredients:[]});
   const [recipeIngRow, setRecipeIngRow] = useState({ingredientId:"", qty:""});
+
+  // ── DEBUG STATE ───────────────────────────────────────────
+  const [debugLogs, setDebugLogs]         = useState([]);
+  const [debugLoading, setDebugLoading]   = useState({});
+  const [debugRaw, setDebugRaw]           = useState({});
+  const [debugExpanded, setDebugExpanded] = useState({});
+  const [customEp, setCustomEp]           = useState("products.json?limit=5");
+  const [customResult, setCustomResult]   = useState(null);
+  const [customLoading, setCustomLoading] = useState(false);
 
   const ar  = lang === "AR";
   const dir = ar ? "rtl" : "ltr";
@@ -193,6 +202,8 @@ function App() {
 
     const loadProducts = async (token, sub, tokenType) => {
       setAuthLoading(true);
+      // أظهر loading indicator على صفحة الـ dashboard
+      setPage(PAGES.DASHBOARD);
       try {
         let products = null;
         const types = tokenType === "bearer" ? ["bearer","apikey"] : ["apikey","bearer"];
@@ -219,17 +230,18 @@ function App() {
           } catch {}
         }
 
-        // ── مسح البيانات التجريبية دائماً عند الاتصال ──────
-        setIngredients(products && products.length > 0 ? products : []);
-        setRecipes([]);
-        setConnection(c => ({...c, status:"connected", token}));
-
+        // عند الاتصال الحقيقي: استخدم بيانات دفترة إن وجدت، وإلا اترك الـ demo
         if (products && products.length > 0) {
+          setIngredients(products);
+          setRecipes([]); // وصفات الديمو لا تنطبق على منتجات حقيقية
           toast(ar?`✅ تم الاتصال! جُلب ${products.length} منتج من دفترة`:`✅ Connected! ${products.length} products from Daftra`);
         } else {
-          toast(ar?"✅ تم الاتصال بدفترة! لا توجد منتجات — أضفها من دفترة":"✅ Connected! No products found — add them in Daftra");
+          // لا توجد منتجات في دفترة — أبقِ الديمو مرئياً مع رسالة
+          setIngredients(DEMO_ING);
+          setRecipes(DEMO_RECIPES);
+          toast(ar?"⚠ متصل بدفترة — لا توجد منتجات. تعرض البيانات التجريبية":"⚠ Connected — No products in Daftra. Showing demo data","warn");
         }
-        setPage(PAGES.DASHBOARD);
+        setConnection(c => ({...c, status:"connected", token}));
 
       } catch(err) {
         toast(ar?"❌ تعذّر جلب البيانات":"❌ Failed to load data","error");
@@ -349,6 +361,7 @@ function App() {
     {id:PAGES.RECIPES,     icon:"✦", ar:"الوصفات",    en:"Recipes"},
     {id:PAGES.REPORTS,     icon:"◎", ar:"التقارير",   en:"Reports"},
     {id:PAGES.SETUP,       icon:"⚙", ar:"الإعدادات",  en:"Settings"},
+    {id:PAGES.DEBUG,       icon:"🔬", ar:"فحص API",   en:"API Debug"},
   ];
 
   // ── LOGO ─────────────────────────────────────────────────
@@ -503,6 +516,14 @@ function App() {
   // ── DASHBOARD ─────────────────────────────────────────────
   const renderDashboard = () => (
     <>
+      {authLoading && (
+        <div style={{position:"fixed",inset:0,background:"rgba(255,253,247,0.92)",zIndex:300,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}}>
+          <div style={{width:52,height:52,border:`4px solid ${C.borderSoft}`,borderTop:`4px solid ${C.gold}`,borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
+          <div style={{fontSize:15,fontWeight:700,color:C.goldDark}}>{ar?"جاري جلب البيانات من دفترة...":"Loading data from Daftra..."}</div>
+          <div style={{fontSize:11,color:C.textFaint}}>{ar?"يرجى الانتظار":"Please wait"}</div>
+          <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+        </div>
+      )}
       <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(4,1fr)",gap:12,marginBottom:16}}>
         {[
           {label:ar?"متوسط Food Cost":"Avg Food Cost", value:`${avgFC.toFixed(1)}%`, color:getColor(avgFC), sub:getLabel(avgFC,ar)},
@@ -882,12 +903,252 @@ function App() {
     </>
   );
 
+  // ── DEBUG PANEL ───────────────────────────────────────────
+  const addLog = (type, msg, detail="") => {
+    const ts = new Date().toLocaleTimeString("ar-EG");
+    setDebugLogs(l => [{id:Date.now(), type, msg, detail, ts}, ...l.slice(0,49)]);
+  };
+
+  const debugEndpoints = [
+    {key:"products",       label:"المنتجات",         labelEN:"Products",          ep:"products.json?limit=10",           icon:"📦"},
+    {key:"product_cats",   label:"تصنيفات المنتجات", labelEN:"Product Categories",ep:"product_categories.json?limit=10", icon:"🏷"},
+    {key:"purchase_inv",   label:"فواتير الشراء",    labelEN:"Purchase Invoices", ep:"purchase_invoices.json?limit=5",   icon:"🧾"},
+    {key:"suppliers",      label:"الموردون",          labelEN:"Suppliers",         ep:"suppliers.json?limit=5",           icon:"🏭"},
+  ];
+
+  const runDebugTest = async (ep, key) => {
+    const token = connection.token || DaftraAPI.getToken();
+    const sub   = DaftraAPI.getSubdomain() || connection.subdomain;
+    if (!token) { addLog("error", "لا يوجد Token — اتصل بدفترة أولاً", "No token found in sessionStorage"); return; }
+    setDebugLoading(l => ({...l, [key]:true}));
+    setDebugRaw(r => ({...r, [key]:null}));
+    const started = Date.now();
+    try {
+      const url = `/api/daftra?subdomain=${encodeURIComponent(sub)}&apikey=${encodeURIComponent(token)}&endpoint=${encodeURIComponent(ep)}`;
+      addLog("info", `→ GET /api/daftra?endpoint=${ep}`, `subdomain: ${sub||"(فارغ)"} | token: ${token.slice(0,8)}...`);
+      const res = await fetch(url);
+      const ms  = Date.now() - started;
+      const txt = await res.text();
+      let parsed = null;
+      try { parsed = JSON.parse(txt); } catch { parsed = {_raw: txt}; }
+      setDebugRaw(r => ({...r, [key]:{status:res.status, ms, data:parsed}}));
+      if (!res.ok) {
+        addLog("error", `✗ ${key} → HTTP ${res.status} (${ms}ms)`, txt.slice(0,200));
+      } else {
+        const count = parsed?.data?.length ?? (parsed?.data ? 1 : "?");
+        addLog("success", `✓ ${key} → ${res.status} OK (${ms}ms) — ${count} سجل`, "");
+      }
+    } catch(err) {
+      addLog("error", `✗ ${key} → Network Error`, err.message);
+      setDebugRaw(r => ({...r, [key]:{status:"ERR", ms:Date.now()-started, data:{error:err.message}}}));
+    } finally {
+      setDebugLoading(l => ({...l, [key]:false}));
+    }
+  };
+
+  const runAllTests = () => debugEndpoints.forEach(e => runDebugTest(e.ep, e.key));
+
+  const runCustom = async () => {
+    const token = connection.token || DaftraAPI.getToken();
+    const sub   = DaftraAPI.getSubdomain() || connection.subdomain;
+    if (!token) { addLog("error","لا يوجد token — اتصل بدفترة أولاً",""); return; }
+    setCustomLoading(true); setCustomResult(null);
+    const started = Date.now();
+    try {
+      const url = `/api/daftra?subdomain=${encodeURIComponent(sub)}&apikey=${encodeURIComponent(token)}&endpoint=${encodeURIComponent(customEp)}`;
+      const res = await fetch(url);
+      const ms  = Date.now() - started;
+      const txt = await res.text();
+      let parsed = null; try { parsed = JSON.parse(txt); } catch { parsed = {_raw:txt}; }
+      setCustomResult({status:res.status, ms, data:parsed});
+      addLog(res.ok?"success":"error", `custom → ${res.status} (${ms}ms)`, customEp);
+    } catch(err) {
+      setCustomResult({status:"ERR", ms:0, data:{error:err.message}});
+      addLog("error","custom → "+err.message, customEp);
+    } finally { setCustomLoading(false); }
+  };
+
+  const pingProxy = async () => {
+    addLog("info", "→ فحص /api/daftra (proxy health check)", "");
+    try {
+      const res = await fetch("/api/daftra?subdomain=test&apikey=test&endpoint=products.json?limit=1");
+      const ms  = Date.now();
+      const txt = await res.text();
+      addLog(res.status < 500 ? "success" : "error", `proxy → HTTP ${res.status}`, txt.slice(0,100));
+    } catch(err) {
+      addLog("error", "proxy → فشل الوصول للـ proxy", err.message);
+    }
+  };
+
+  const renderDebug = () => {
+    const token  = connection.token || DaftraAPI.getToken();
+    const sub    = DaftraAPI.getSubdomain() || connection.subdomain;
+    const isConn = connection.status === "connected";
+
+    return (
+      <div style={{direction:"ltr"}}>
+
+        {/* ── Status Banner ──────────────────────────────────── */}
+        <div style={{background:isConn?"#F0FFF4":"#FFF8E0",border:`1.5px solid ${isConn?C.positive:C.warning}`,borderRadius:12,padding:"14px 18px",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
+          <div>
+            <div style={{fontSize:13,fontWeight:800,color:isConn?C.positive:C.warning}}>
+              {isConn ? "🟢 Connected to Daftra" : "🟡 Not Connected"}
+            </div>
+            <div style={{fontSize:11,color:C.textFaint,marginTop:3,fontFamily:"monospace"}}>
+              subdomain: <strong style={{color:C.text}}>{sub||"—"}</strong>
+              {"  |  "}
+              token: <strong style={{color:C.text}}>{token ? token.slice(0,12)+"..." : "none"}</strong>
+              {"  |  "}
+              type: <strong style={{color:C.text}}>{sessionStorage.getItem("clink_menu_token")?"sessionStorage":"none"}</strong>
+            </div>
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={pingProxy} style={{padding:"7px 14px",borderRadius:7,border:`1px solid ${C.border}`,background:"white",color:C.textDim,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"monospace"}}>🔌 Ping Proxy</button>
+            <button onClick={runAllTests} disabled={!isConn} style={{padding:"7px 16px",borderRadius:7,border:"none",background:isConn?`linear-gradient(135deg,${C.gold},${C.goldDark})`:"#ccc",color:"white",fontSize:11,fontWeight:700,cursor:isConn?"pointer":"not-allowed",fontFamily:"monospace",opacity:isConn?1:0.6}}>▶ Run All Tests</button>
+          </div>
+        </div>
+
+        {/* ── Session Info ────────────────────────────────────── */}
+        <div style={{background:C.white,border:`1px solid ${C.border}`,borderRadius:12,padding:"16px 18px",marginBottom:16}}>
+          <div style={{fontSize:12,fontWeight:800,color:C.goldDark,marginBottom:12,letterSpacing:1}}>SESSION STORAGE</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:10}}>
+            {[
+              {key:"clink_menu_token", label:"Token", icon:"🔑"},
+              {key:"clink_menu_sub",   label:"Subdomain", icon:"🌐"},
+            ].map(item => {
+              const val = (() => { try { return sessionStorage.getItem(item.key); } catch { return null; } })();
+              return (
+                <div key={item.key} style={{background:C.surface,borderRadius:8,padding:"10px 14px",border:`1px solid ${val?C.positive+"40":C.negative+"40"}`}}>
+                  <div style={{fontSize:10,color:C.textFaint,marginBottom:3}}>{item.icon} {item.label}</div>
+                  <div style={{fontFamily:"monospace",fontSize:11,color:val?C.text:C.negative,wordBreak:"break-all"}}>
+                    {val ? (val.length > 40 ? val.slice(0,40)+"…" : val) : "❌ not found"}
+                  </div>
+                  {val && <div style={{fontSize:9,color:C.textFaint,marginTop:3}}>length: {val.length} chars</div>}
+                </div>
+              );
+            })}
+            <div style={{background:C.surface,borderRadius:8,padding:"10px 14px",border:`1px solid ${C.border}`}}>
+              <div style={{fontSize:10,color:C.textFaint,marginBottom:3}}>📡 Connection Status</div>
+              <div style={{fontFamily:"monospace",fontSize:11,color:C.text}}>{connection.status}</div>
+              <div style={{fontSize:9,color:C.textFaint,marginTop:3}}>ingredients: {ingredients.length} | recipes: {recipes.length}</div>
+            </div>
+            <div style={{background:C.surface,borderRadius:8,padding:"10px 14px",border:`1px solid ${C.border}`}}>
+              <div style={{fontSize:10,color:C.textFaint,marginBottom:3}}>🌍 OAuth Redirect URI</div>
+              <div style={{fontFamily:"monospace",fontSize:10,color:C.text,wordBreak:"break-all"}}>https://clink-menu.vercel.app/callback</div>
+              <div style={{fontSize:9,color:C.textFaint,marginTop:3}}>client_id: 555</div>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Endpoint Tests ──────────────────────────────────── */}
+        <div style={{background:C.white,border:`1px solid ${C.border}`,borderRadius:12,padding:"16px 18px",marginBottom:16}}>
+          <div style={{fontSize:12,fontWeight:800,color:C.goldDark,marginBottom:12,letterSpacing:1}}>ENDPOINT TESTS</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:12}}>
+            {debugEndpoints.map(ep => {
+              const raw    = debugRaw[ep.key];
+              const loading= debugLoading[ep.key];
+              const ok     = raw && raw.status >= 200 && raw.status < 300;
+              const expanded = debugExpanded[ep.key];
+              return (
+                <div key={ep.key} style={{border:`1.5px solid ${raw?(ok?C.positive:C.negative):C.border}`,borderRadius:10,overflow:"hidden"}}>
+                  <div style={{padding:"12px 14px",background:raw?(ok?"#F0FFF4":"#FFF0EE"):C.surface}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                      <div style={{fontSize:13,fontWeight:700,color:C.text}}>{ep.icon} {ep.label}</div>
+                      {raw && <span style={{fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:10,background:ok?C.positive+"20":C.negative+"20",color:ok?C.positive:C.negative}}>{raw.status} {raw.ms}ms</span>}
+                    </div>
+                    <div style={{fontFamily:"monospace",fontSize:9,color:C.textFaint,marginBottom:8}}>{ep.ep}</div>
+                    <div style={{display:"flex",gap:6}}>
+                      <button onClick={() => runDebugTest(ep.ep, ep.key)} disabled={!isConn||loading} style={{flex:1,padding:"6px",borderRadius:6,border:"none",background:isConn?C.gold:"#ccc",color:"white",fontSize:11,fontWeight:700,cursor:isConn?"pointer":"not-allowed",fontFamily:"monospace"}}>
+                        {loading ? "⏳ testing..." : "▶ Test"}
+                      </button>
+                      {raw && <button onClick={() => setDebugExpanded(x=>({...x,[ep.key]:!x[ep.key]}))} style={{padding:"6px 10px",borderRadius:6,border:`1px solid ${C.border}`,background:"white",color:C.textDim,fontSize:11,cursor:"pointer",fontFamily:"monospace"}}>
+                        {expanded?"▲ Hide":"▼ JSON"}
+                      </button>}
+                    </div>
+                    {raw && (
+                      <div style={{marginTop:8,fontSize:11,color:ok?C.positive:C.negative,fontWeight:600}}>
+                        {ok ? `✓ ${raw.data?.data?.length ?? "?"} records returned` : `✗ ${raw.data?.message||raw.data?.error||"Error"}`}
+                      </div>
+                    )}
+                  </div>
+                  {expanded && raw && (
+                    <div style={{borderTop:`1px solid ${C.border}`,padding:"10px 14px",background:"#0D1117",maxHeight:200,overflowY:"auto"}}>
+                      <pre style={{fontFamily:"monospace",fontSize:10,color:"#7EE787",margin:0,whiteSpace:"pre-wrap",wordBreak:"break-all"}}>
+                        {JSON.stringify(raw.data, null, 2).slice(0, 3000)}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* ── Custom Endpoint ─────────────────────────────────── */}
+        <div style={{background:C.white,border:`1px solid ${C.border}`,borderRadius:12,padding:"16px 18px",marginBottom:16}}>
+          <div style={{fontSize:12,fontWeight:800,color:C.goldDark,marginBottom:12,letterSpacing:1}}>CUSTOM ENDPOINT</div>
+          <div style={{display:"flex",gap:8,marginBottom:10}}>
+            <input value={customEp} onChange={e=>setCustomEp(e.target.value)} placeholder="products.json?limit=5" style={{flex:1,padding:"8px 12px",border:`1.5px solid ${C.border}`,borderRadius:7,fontFamily:"monospace",fontSize:12,background:C.surface,color:C.text}}/>
+            <button onClick={runCustom} disabled={!isConn||customLoading} style={{padding:"8px 16px",borderRadius:7,border:"none",background:isConn?C.gold:"#ccc",color:"white",fontSize:12,fontWeight:700,cursor:isConn?"pointer":"not-allowed",fontFamily:"monospace"}}>
+              {customLoading?"⏳":"▶ Run"}
+            </button>
+          </div>
+          <div style={{fontSize:10,color:C.textFaint,marginBottom:10,fontFamily:"monospace"}}>
+            Full URL: /api/daftra?subdomain={sub||"?"}&apikey=***&endpoint=<strong style={{color:C.gold}}>{customEp}</strong>
+          </div>
+          {customResult && (
+            <div style={{borderRadius:8,overflow:"hidden",border:`1px solid ${customResult.status>=200&&customResult.status<300?C.positive:C.negative}`}}>
+              <div style={{padding:"8px 12px",background:customResult.status>=200&&customResult.status<300?"#F0FFF4":"#FFF0EE",display:"flex",gap:12,fontSize:11,fontWeight:700}}>
+                <span style={{color:customResult.status>=200&&customResult.status<300?C.positive:C.negative}}>HTTP {customResult.status}</span>
+                <span style={{color:C.textFaint}}>{customResult.ms}ms</span>
+                <span style={{color:C.textFaint}}>records: {customResult.data?.data?.length??"-"}</span>
+              </div>
+              <div style={{background:"#0D1117",padding:"10px 14px",maxHeight:220,overflowY:"auto"}}>
+                <pre style={{fontFamily:"monospace",fontSize:10,color:"#7EE787",margin:0,whiteSpace:"pre-wrap",wordBreak:"break-all"}}>
+                  {JSON.stringify(customResult.data,null,2).slice(0,4000)}
+                </pre>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── Activity Log ────────────────────────────────────── */}
+        <div style={{background:C.white,border:`1px solid ${C.border}`,borderRadius:12,padding:"16px 18px"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+            <div style={{fontSize:12,fontWeight:800,color:C.goldDark,letterSpacing:1}}>ACTIVITY LOG ({debugLogs.length})</div>
+            <button onClick={()=>setDebugLogs([])} style={{padding:"4px 10px",borderRadius:6,border:`1px solid ${C.border}`,background:C.surface,color:C.textFaint,fontSize:10,cursor:"pointer",fontFamily:"monospace"}}>Clear</button>
+          </div>
+          {debugLogs.length === 0 ? (
+            <div style={{textAlign:"center",padding:"20px",fontSize:12,color:C.textFaint,fontFamily:"monospace"}}>
+              No activity yet — run a test above
+            </div>
+          ) : (
+            <div style={{background:"#0D1117",borderRadius:8,padding:"12px",maxHeight:260,overflowY:"auto",fontFamily:"monospace",fontSize:11}}>
+              {debugLogs.map(log => (
+                <div key={log.id} style={{marginBottom:6,display:"flex",gap:10,alignItems:"flex-start"}}>
+                  <span style={{color:"#6E7681",flexShrink:0}}>{log.ts}</span>
+                  <span style={{color:log.type==="success"?"#7EE787":log.type==="error"?"#F85149":"#79C0FF",flexShrink:0}}>
+                    {log.type==="success"?"✓":log.type==="error"?"✗":"→"}
+                  </span>
+                  <span style={{color:"#E6EDF3"}}>{log.msg}</span>
+                  {log.detail && <span style={{color:"#6E7681",fontSize:10}}>{log.detail}</span>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+      </div>
+    );
+  };
+
   const pageTitle = {
     [PAGES.SETUP]:       ar?"إعدادات دفترة":"Daftra Settings",
     [PAGES.DASHBOARD]:   ar?"لوحة التحكم":"Dashboard",
     [PAGES.INGREDIENTS]: ar?"المكوّنات":"Ingredients",
     [PAGES.RECIPES]:     ar?"الوصفات":"Recipes",
     [PAGES.REPORTS]:     ar?"التقارير":"Reports",
+    [PAGES.DEBUG]:       ar?"🔬 لوحة فحص API":"🔬 API Debug Panel",
   }[page];
 
   return (
@@ -917,6 +1178,7 @@ function App() {
           {page===PAGES.INGREDIENTS  && renderIngredients()}
           {page===PAGES.RECIPES      && renderRecipes()}
           {page===PAGES.REPORTS      && renderReports()}
+          {page===PAGES.DEBUG        && renderDebug()}
         </main>
       </div>
     </>
