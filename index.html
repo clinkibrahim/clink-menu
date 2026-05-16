@@ -315,7 +315,8 @@ function App() {
     DaftraAPI.clearToken();
     setConnection({subdomain:"",apiKey:"",status:"disconnected",token:""});
     setIngredients(DEMO_ING);
-    toast(ar?"تم قطع الاتصال":"Disconnected");
+    setRecipes(DEMO_RECIPES);
+    toast(ar?"تم قطع الاتصال — تم استعادة البيانات التجريبية":"Disconnected — Demo data restored");
   };
 
   // ── CALCULATIONS ──────────────────────────────────────────
@@ -641,26 +642,64 @@ function App() {
     </>
   );
 
+  // ── RECIPE HELPERS ────────────────────────────────────────
+  const saveRecipe = () => {
+    if (!newRecipe.name) return toast(ar?"أدخل اسم الوصفة":"Enter recipe name","error");
+    if (!newRecipe.sellingPrice || parseFloat(newRecipe.sellingPrice) <= 0) return toast(ar?"أدخل سعر البيع":"Enter selling price","error");
+    if (newRecipe.ingredients.length === 0) return toast(ar?"أضف مكوّناً واحداً على الأقل":"Add at least one ingredient","error");
+    if (editingRecipe) {
+      setRecipes(rs => rs.map(r => r.id === editingRecipe ? {...newRecipe, id:editingRecipe, sellingPrice:parseFloat(newRecipe.sellingPrice)} : r));
+      toast(ar?"✅ تم تحديث الوصفة":"✅ Recipe updated");
+    } else {
+      setRecipes(rs => [...rs, {...newRecipe, id:Date.now(), sellingPrice:parseFloat(newRecipe.sellingPrice)}]);
+      toast(ar?"✅ تم إضافة الوصفة":"✅ Recipe added");
+    }
+    setShowRecipeForm(false);
+    setEditingRecipe(null);
+    setNewRecipe({name:"",nameEN:"",category:"أطباق رئيسية",catEN:"Main Dishes",sellingPrice:"",portions:1,ingredients:[]});
+    setRecipeIngRow({ingredientId:"",qty:""});
+  };
+
+  const addIngToRecipe = () => {
+    if (!recipeIngRow.ingredientId) return toast(ar?"اختر المكوّن":"Select ingredient","warn");
+    if (!recipeIngRow.qty || parseFloat(recipeIngRow.qty) <= 0) return toast(ar?"أدخل الكمية":"Enter quantity","warn");
+    const already = newRecipe.ingredients.find(i => i.ingredientId === parseInt(recipeIngRow.ingredientId));
+    if (already) return toast(ar?"المكوّن موجود مسبقاً":"Ingredient already added","warn");
+    setNewRecipe(r => ({...r, ingredients:[...r.ingredients, {ingredientId:parseInt(recipeIngRow.ingredientId), qty:parseFloat(recipeIngRow.qty)}]}));
+    setRecipeIngRow({ingredientId:"",qty:""});
+  };
+
   // ── RECIPES ───────────────────────────────────────────────
   const renderRecipes = () => (
     <>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
         <span style={{fontSize:13,color:C.textFaint}}>{recipes.length} {ar?"وصفة":"recipes"}</span>
-        <button onClick={() => {setEditingRecipe(null); setNewRecipe({name:"",nameEN:"",category:"أطباق رئيسية",catEN:"Main Dishes",sellingPrice:"",portions:1,ingredients:[]}); setShowRecipeForm(true);}} style={{padding:"7px 14px",borderRadius:8,border:"none",background:`linear-gradient(135deg,${C.gold},${C.goldDark})`,color:"white",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ {ar?"إضافة وصفة":"Add Recipe"}</button>
+        <button onClick={() => {setEditingRecipe(null); setNewRecipe({name:"",nameEN:"",category:"أطباق رئيسية",catEN:"Main Dishes",sellingPrice:"",portions:1,ingredients:[]}); setRecipeIngRow({ingredientId:"",qty:""}); setShowRecipeForm(true);}} style={{padding:"7px 14px",borderRadius:8,border:"none",background:`linear-gradient(135deg,${C.gold},${C.goldDark})`,color:"white",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ {ar?"إضافة وصفة":"Add Recipe"}</button>
       </div>
+
+      {/* Empty State */}
+      {enriched.length === 0 && (
+        <div style={{background:C.white,border:`1px solid ${C.border}`,borderRadius:14,padding:"40px 20px",boxShadow:C.shadow,textAlign:"center"}}>
+          <div style={{fontSize:40,marginBottom:12}}>📋</div>
+          <div style={{fontSize:14,fontWeight:700,color:C.textDim,marginBottom:8}}>{ar?"لا توجد وصفات بعد":"No recipes yet"}</div>
+          <div style={{fontSize:12,color:C.textFaint}}>{ar?"اضغط \"+ إضافة وصفة\" لبدء إنشاء وصفاتك":"Click \"+ Add Recipe\" to create your first recipe"}</div>
+        </div>
+      )}
+
       <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":isTablet?"1fr 1fr":"repeat(3,1fr)",gap:14}}>
         {enriched.map(r => (
           <div key={r.id} style={{background:C.white,border:`1px solid ${C.border}`,borderTop:`3px solid ${getColor(r.pct)}`,borderRadius:14,padding:"16px 18px",boxShadow:C.shadow}}>
             <div style={{fontSize:14,fontWeight:800,color:C.text,marginBottom:4}}>{ar?r.name:(r.nameEN||r.name)}</div>
-            <div style={{marginBottom:12}}>
+            <div style={{marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <span style={{padding:"2px 9px",borderRadius:20,background:C.goldPale,color:C.goldDark,border:`1px solid ${C.border}`,fontSize:11,fontWeight:700}}>{ar?r.category:(r.catEN||r.category)}</span>
+              <span style={{fontSize:11,color:C.textFaint}}>{r.ingredients.length} {ar?"مكوّنات":"items"}</span>
             </div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
               {[
                 {l:ar?"تكلفة الطبق":"Cost",  v:`${r.cost.toFixed(2)} ${SY}`, c:C.negative},
-                {l:ar?"سعر البيع":"Price",    v:`${r.sellingPrice} ${SY}`,     c:C.info},
+                {l:ar?"سعر البيع":"Price",    v:`${r.sellingPrice} ${SY}`,    c:C.info},
                 {l:ar?"هامش الربح":"Profit", v:`${r.profit.toFixed(2)} ${SY}`,c:C.positive},
-                {l:ar?"نسبة التكلفة":"FC%",  v:`${r.pct.toFixed(1)}%`,        c:getColor(r.pct)},
+                {l:ar?"نسبة التكلفة":"FC%",  v:`${r.pct.toFixed(1)}%`,       c:getColor(r.pct)},
               ].map((item,i) => (
                 <div key={i} style={{background:C.surface,borderRadius:8,padding:"8px 10px"}}>
                   <div style={{fontSize:9,color:C.textFaint,marginBottom:2}}>{item.l}</div>
@@ -668,10 +707,111 @@ function App() {
                 </div>
               ))}
             </div>
-            <button onClick={() => {setNewRecipe({...r,sellingPrice:r.sellingPrice.toString()}); setEditingRecipe(r.id); setShowRecipeForm(true);}} style={{width:"100%",padding:"7px",borderRadius:8,border:`1px solid ${C.gold}`,background:"transparent",color:C.gold,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{ar?"تعديل":"Edit"}</button>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={() => {setNewRecipe({...r,sellingPrice:r.sellingPrice.toString()}); setEditingRecipe(r.id); setRecipeIngRow({ingredientId:"",qty:""}); setShowRecipeForm(true);}} style={{flex:1,padding:"7px",borderRadius:8,border:`1px solid ${C.gold}`,background:"transparent",color:C.gold,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{ar?"✏ تعديل":"✏ Edit"}</button>
+              <button onClick={() => {if(window.confirm(ar?"حذف هذه الوصفة؟":"Delete this recipe?")) {setRecipes(rs=>rs.filter(x=>x.id!==r.id)); toast(ar?"تم الحذف":"Deleted");}}} style={{padding:"7px 12px",borderRadius:8,border:`1px solid ${C.negative}30`,background:"#FFF0EE",color:C.negative,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{ar?"🗑":"🗑"}</button>
+            </div>
           </div>
         ))}
       </div>
+
+      {/* ── RECIPE FORM MODAL ──────────────────────────────── */}
+      {showRecipeForm && (
+        <div style={{position:"fixed",inset:0,background:"rgba(30,20,8,0.5)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={() => setShowRecipeForm(false)}>
+          <div onClick={e => e.stopPropagation()} style={{background:C.white,borderRadius:16,padding:24,width:"100%",maxWidth:560,boxShadow:"0 20px 60px rgba(0,0,0,0.25)",maxHeight:"90vh",overflowY:"auto"}}>
+            <div style={{fontSize:17,fontWeight:800,color:C.goldDark,marginBottom:18}}>
+              {editingRecipe ? (ar?"✏ تعديل الوصفة":"✏ Edit Recipe") : (ar?"+ إضافة وصفة جديدة":"+ New Recipe")}
+            </div>
+
+            {/* Basic Info */}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+              {[
+                {label:ar?"اسم الوصفة (عربي)":"Arabic Name", val:newRecipe.name,    key:"name",    ph:ar?"دجاج مشوي":"Arabic name"},
+                {label:ar?"الاسم (إنجليزي)":"English Name",  val:newRecipe.nameEN,  key:"nameEN",  ph:"Grilled Chicken"},
+                {label:ar?"التصنيف":"Category",               val:newRecipe.category,key:"category",ph:"",select:["أطباق رئيسية","بيتزا","برجر","مشويات","مقبلات","حلويات","مشروبات","سلطات","أخرى"]},
+                {label:ar?"Category (EN)":"Category (EN)",   val:newRecipe.catEN,   key:"catEN",   ph:"",select:["Main Dishes","Pizza","Burgers","Grills","Appetizers","Desserts","Beverages","Salads","Other"]},
+              ].map(f => (
+                <div key={f.key}>
+                  <div style={{fontSize:11,fontWeight:700,color:C.textFaint,marginBottom:4}}>{f.label}</div>
+                  {f.select ? (
+                    <select value={f.val} onChange={e => setNewRecipe({...newRecipe,[f.key]:e.target.value})} style={{width:"100%",padding:"8px 10px",border:`1.5px solid ${C.border}`,borderRadius:7,fontSize:12,fontFamily:"inherit",background:C.white,color:C.text}}>
+                      {f.select.map(o => <option key={o}>{o}</option>)}
+                    </select>
+                  ) : (
+                    <input value={f.val} onChange={e => setNewRecipe({...newRecipe,[f.key]:e.target.value})} placeholder={f.ph} style={{width:"100%",padding:"8px 10px",border:`1.5px solid ${C.border}`,borderRadius:7,fontSize:12,fontFamily:"inherit",background:C.white,color:C.text,boxSizing:"border-box"}}/>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* Selling Price */}
+            <div style={{marginBottom:14}}>
+              <div style={{fontSize:11,fontWeight:700,color:C.textFaint,marginBottom:4}}>{ar?"سعر البيع":"Selling Price"} ({SY})</div>
+              <input type="number" value={newRecipe.sellingPrice} onChange={e => setNewRecipe({...newRecipe,sellingPrice:e.target.value})} placeholder="0.00" style={{width:"100%",padding:"8px 10px",border:`1.5px solid ${C.gold}`,borderRadius:7,fontSize:14,fontWeight:700,fontFamily:"inherit",background:C.goldLight,color:C.goldDark,boxSizing:"border-box"}}/>
+            </div>
+
+            {/* Ingredients Section */}
+            <div style={{background:C.surface,borderRadius:10,padding:"14px",marginBottom:14}}>
+              <div style={{fontSize:13,fontWeight:700,color:C.goldDark,marginBottom:10}}>🧂 {ar?"مكوّنات الوصفة":"Recipe Ingredients"}</div>
+
+              {/* Added ingredients list */}
+              {newRecipe.ingredients.length > 0 && (
+                <div style={{marginBottom:10}}>
+                  {newRecipe.ingredients.map((ri, idx) => {
+                    const ing = ingredients.find(i => i.id === ri.ingredientId);
+                    const rowCost = ing ? ing.price * ri.qty : 0;
+                    return (
+                      <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:C.white,borderRadius:7,marginBottom:5,border:`1px solid ${C.borderSoft}`}}>
+                        <div>
+                          <span style={{fontSize:12,fontWeight:700,color:C.text}}>{ar?(ing?.name||"؟"):(ing?.nameEN||ing?.name||"?")}</span>
+                          <span style={{fontSize:11,color:C.textFaint,marginRight:6,marginLeft:6}}>× {ri.qty} {ar?(ing?.unit||""):(ing?.unitEN||"")}</span>
+                        </div>
+                        <div style={{display:"flex",alignItems:"center",gap:8}}>
+                          <span style={{fontSize:11,fontWeight:700,color:C.negative}}>{rowCost.toFixed(2)} {SY}</span>
+                          <button onClick={() => setNewRecipe(r => ({...r,ingredients:r.ingredients.filter((_,i)=>i!==idx)}))} style={{padding:"2px 7px",borderRadius:5,border:"none",background:"#FFF0EE",color:C.negative,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✕</button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div style={{textAlign:"left",fontSize:11,fontWeight:700,color:C.negative,marginTop:4}}>
+                    {ar?"إجمالي التكلفة:":"Total Cost:"} {newRecipe.ingredients.reduce((s,ri) => { const ing=ingredients.find(i=>i.id===ri.ingredientId); return s+(ing?ing.price*ri.qty:0); }, 0).toFixed(2)} {SY}
+                  </div>
+                </div>
+              )}
+
+              {/* Add ingredient row */}
+              {ingredients.length > 0 ? (
+                <div style={{display:"flex",gap:8,alignItems:"flex-end"}}>
+                  <div style={{flex:2}}>
+                    <div style={{fontSize:10,color:C.textFaint,marginBottom:3}}>{ar?"المكوّن":"Ingredient"}</div>
+                    <select value={recipeIngRow.ingredientId} onChange={e => setRecipeIngRow({...recipeIngRow,ingredientId:e.target.value})} style={{width:"100%",padding:"7px 10px",border:`1.5px solid ${C.border}`,borderRadius:7,fontSize:12,fontFamily:"inherit",background:C.white,color:C.text}}>
+                      <option value="">{ar?"-- اختر --":"-- Select --"}</option>
+                      {ingredients.map(ing => (
+                        <option key={ing.id} value={ing.id}>{ar?ing.name:(ing.nameEN||ing.name)} ({ing.price} {SY}/{ar?ing.unit:(ing.unitEN||ing.unit)})</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:10,color:C.textFaint,marginBottom:3}}>{ar?"الكمية":"Qty"}</div>
+                    <input type="number" value={recipeIngRow.qty} onChange={e => setRecipeIngRow({...recipeIngRow,qty:e.target.value})} placeholder="0.25" step="0.01" style={{width:"100%",padding:"7px 10px",border:`1.5px solid ${C.border}`,borderRadius:7,fontSize:12,fontFamily:"inherit",background:C.white,color:C.text,boxSizing:"border-box"}}/>
+                  </div>
+                  <button onClick={addIngToRecipe} style={{padding:"7px 12px",borderRadius:7,border:"none",background:C.gold,color:"white",fontSize:13,fontWeight:800,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>+</button>
+                </div>
+              ) : (
+                <div style={{textAlign:"center",padding:"12px",fontSize:12,color:C.textFaint}}>
+                  {ar?"⚠ أضف مكوّنات أولاً من صفحة المكوّنات":"⚠ Add ingredients first from the Ingredients page"}
+                </div>
+              )}
+            </div>
+
+            {/* Action Buttons */}
+            <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+              <button onClick={() => {setShowRecipeForm(false); setEditingRecipe(null);}} style={{padding:"9px 18px",borderRadius:8,border:`1px solid ${C.border}`,background:"transparent",color:C.gold,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{ar?"إلغاء":"Cancel"}</button>
+              <button onClick={saveRecipe} style={{padding:"9px 22px",borderRadius:8,border:"none",background:`linear-gradient(135deg,${C.gold},${C.goldDark})`,color:"white",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",boxShadow:`0 3px 10px ${C.gold}50`}}>{editingRecipe?(ar?"تحديث":"Update"):(ar?"حفظ الوصفة":"Save Recipe")}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 
