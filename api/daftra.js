@@ -1,54 +1,71 @@
 // ═══════════════════════════════════════════════════════════
-//  CLink · Daftra API Proxy
-//  Vercel Serverless Function — api/daftra.js
+//  CLink Menu · Daftra API Proxy — api/daftra.js
+//  يمرر طلبات الـ API لدفترة مع إخفاء الـ API Key عن المتصفح
 // ═══════════════════════════════════════════════════════════
 
 export default async function handler(req, res) {
+  // ── CORS Headers ────────────────────────────────────────
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+
   if (req.method === "OPTIONS") return res.status(200).end();
+  if (req.method !== "GET")    return res.status(405).json({ success:false, error:"Method not allowed" });
 
-  const { subdomain, apikey, endpoint, token_type } = req.query;
+  const { subdomain, apikey, endpoint } = req.query;
 
-  if (!apikey || !endpoint) {
-    return res.status(400).json({ success:false, error:"missing_params" });
+  // ── Validate required params ─────────────────────────────
+  if (!subdomain || !apikey || !endpoint) {
+    return res.status(400).json({
+      success: false,
+      error: "missing_params",
+      message: "subdomain, apikey, and endpoint are required",
+    });
   }
 
-  // بناء الـ headers حسب نوع التوثيق
-  const headers = { Accept: "application/json", "Content-Type": "application/json" };
-  
-  if (token_type === "bearer") {
-    // OAuth Access Token
-    headers["Authorization"] = `Bearer ${apikey}`;
-  } else {
-    // API Key العادي
-    headers["apikey"] = apikey;
-  }
+  // ── Build Daftra URL ─────────────────────────────────────
+  const daftraURL = `https://${subdomain}.daftra.com/api2/${endpoint}`;
 
-  // محاولة مع subdomain أو بدونه
-  const urls = subdomain
-    ? [`https://${subdomain}.daftra.com/api2/${endpoint}`, `https://app.daftra.com/api2/${endpoint}`]
-    : [`https://app.daftra.com/api2/${endpoint}`];
+  try {
+    const response = await fetch(daftraURL, {
+      method: "GET",
+      headers: {
+        "apikey": apikey,
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+      },
+    });
 
-  let lastErr = null;
-  for (const url of urls) {
-    try {
-      const r = await fetch(url, { headers });
-      if (r.status === 401) {
-        return res.status(401).json({ success:false, error:"invalid_token", message:"التوثيق فشل — تحقق من البيانات" });
-      }
-      if (r.status === 404) continue; // جرب الـ URL التالي
-      if (!r.ok) {
-        lastErr = `HTTP ${r.status}`;
-        continue;
-      }
-      const data = await r.json();
-      return res.status(200).json(data);
-    } catch(e) {
-      lastErr = e.message;
+    const text = await response.text();
+    let data;
+    try { data = JSON.parse(text); }
+    catch (e) {
+      return res.status(502).json({
+        success: false,
+        error: "invalid_json",
+        message: "Daftra returned non-JSON response",
+        raw: text.slice(0, 200),
+      });
     }
-  }
 
-  return res.status(500).json({ success:false, error:"failed", message: lastErr || "فشل الاتصال" });
+    // ── Pass Daftra's response through ───────────────────────
+    if (!response.ok) {
+      return res.status(500).json({
+        success: false,
+        error: "daftra_error",
+        message: `HTTP ${response.status}`,
+        data,
+      });
+    }
+
+    return res.status(200).json(data);
+
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      error: "network_error",
+      message: err.message || "Failed to reach Daftra",
+    });
+  }
 }
